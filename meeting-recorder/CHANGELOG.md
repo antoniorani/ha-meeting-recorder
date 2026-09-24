@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0
+
+- Switch the remote desktop UI to Home Assistant Ingress.
+- Open Meeting Recorder inside the Home Assistant app panel instead of a direct external port.
+- Let Home Assistant handle browser-facing HTTPS and authentication.
+- Serve Selkies over internal HTTP only and disable Selkies Basic Auth under Ingress.
+- Stop publishing TCP port 8080 on the Home Assistant host.
+- Add a sidebar/panel title and icon.
+- Remove the obsolete Selkies username/password options from the app configuration.
+
+
 ## 0.1.1
 
 - Fix Phase 0 startup: hand off to Selkies' real `/etc/container-entrypoint.sh` instead of the nonexistent `/init`.

@@ -15,7 +15,7 @@ Experimental Home Assistant OS app for a persistent remote browser session that 
 This first milestone does **not** record or transcribe meetings yet. Its only purpose is to validate the highest-risk part of the architecture on the target HAOS host:
 
 1. Home Assistant can build and run a Selkies desktop container.
-2. The remote desktop is reachable over HTTPS.
+2. The remote desktop opens through Home Assistant Ingress in the same Home Assistant tab.
 3. The desktop/browser process survives closing and reopening the client UI.
 4. Microphone and webcam forwarding can be enabled from the Selkies client.
 5. Disconnecting the client does not terminate the server-side session.
@@ -36,15 +36,13 @@ docs/
   phase-0-test-plan.md
 ```
 
-## Development branch
-
-Active work starts in `phase-0-bootstrap`.
-
 ## Security note
 
 The Phase 0 spike temporarily requests `SYS_ADMIN` and disables AppArmor so it can enlarge `/dev/shm` inside the container. Selkies recommends a much larger shared-memory allocation than Docker's normal 64 MiB for browser stability.
 
 This is an explicit prototype compromise, not the desired final security posture. The capability must be removed or replaced before the MVP is considered hardened.
+
+The browser-facing UI is served through **Home Assistant Ingress**. Home Assistant handles authentication and HTTPS; Selkies listens only on its internal HTTP port and that port is not published on the HAOS host.
 
 ## License
 

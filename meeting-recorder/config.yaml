@@ -1,5 +1,5 @@
 name: "Meeting Recorder"
-version: "0.1.1"
+version: "0.2.0"
 slug: "meeting_recorder"
 description: "Experimental persistent Selkies browser session for the Meeting Recorder MVP"
 url: "https://github.com/antoniorani/ha-meeting-recorder"
@@ -12,17 +12,13 @@ stage: experimental
 apparmor: false
 privileged:
   - SYS_ADMIN
-webui: "https://[HOST]:[PORT:8080]"
-watchdog: "tcp://[HOST]:[PORT:8080]"
-ports:
-  8080/tcp: 8080
-ports_description:
-  8080/tcp: "Selkies remote desktop (HTTPS)"
+ingress: true
+ingress_port: 8080
+ingress_stream: true
+panel_title: "Meeting Recorder"
+panel_icon: "mdi:record-rec"
+panel_admin: true
 options:
-  selkies_username: "meeting-recorder"
-  selkies_password: "CHANGE_ME_BEFORE_START"
   shm_size_mb: 2048
 schema:
-  selkies_username: "str(1,64)"
-  selkies_password: password
   shm_size_mb: "int(512,4096)"
