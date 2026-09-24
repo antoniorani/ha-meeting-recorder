@@ -82,15 +82,15 @@ if [[ ! -x /etc/container-entrypoint.sh ]]; then
   exit 70
 fi
 
-if ! command -v setpriv >/dev/null 2>&1; then
-  echo "[meeting-recorder] Cannot drop privileges: setpriv is missing from the Selkies image."
+if [[ ! -x /usr/bin/sudo-root ]]; then
+  echo "[meeting-recorder] Cannot drop privileges: /usr/bin/sudo-root is missing from the Selkies image."
   exit 70
 fi
 
+# Keep the desktop account password aligned with the configured Selkies
+# credential without ever printing it.
+export PASSWD="${password}"
+
 echo "[meeting-recorder] Handing off to Selkies as ubuntu (uid 1000)."
 
-exec setpriv \
-  --reuid=1000 \
-  --regid=1000 \
-  --init-groups \
-  /etc/container-entrypoint.sh "$@"
+exec /usr/bin/sudo-root -E -H -u ubuntu -- /etc/container-entrypoint.sh "$@"
