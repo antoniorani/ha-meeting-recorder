@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+OPTIONS_FILE="/data/options.json"
+
+read_option() {
+  local key="$1"
+  python3 - "$OPTIONS_FILE" "$key" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+key = sys.argv[2]
+
+if not path.exists():
+    print("")
+    raise SystemExit(0)
+
+try:
+    data = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    print("")
+    raise SystemExit(0)
+
+value = data.get(key, "")
+print(value if value is not None else "")
+PY
+}
+
+username="$(read_option selkies_username)"
+password="$(read_option selkies_password)"
+shm_size_mb="$(read_option shm_size_mb)"
+
+username="${username:-meeting-recorder}"
+shm_size_mb="${shm_size_mb:-2048}"
+
+if [[ -z "${password}" || "${password}" == "CHANGE_ME_BEFORE_START" ]]; then
+  echo "[meeting-recorder] Refusing to start with the default Selkies password."
+  echo "[meeting-recorder] Set 'selkies_password' in the app Configuration tab and start again."
+  exit 78
+fi
+
+if ! [[ "${shm_size_mb}" =~ ^[0-9]+$ ]] || (( shm_size_mb < 512 || shm_size_mb > 4096 )); then
+  echo "[meeting-recorder] Invalid shm_size_mb. Expected an integer between 512 and 4096."
+  exit 78
+fi
+
+# Selkies recommends a substantially larger /dev/shm than Docker's usual 64 MiB.
+# Home Assistant does not expose Docker's --shm-size directly, so this Phase 0
+# spike remounts /dev/shm inside the container. SYS_ADMIN is intentionally
+# temporary and must be removed or replaced before the MVP is considered hardened.
+if grep -qs ' /dev/shm ' /proc/mounts; then
+  mount -o remount,size="${shm_size_mb}M" /dev/shm
+else
+  mkdir -p /dev/shm
+  mount -t tmpfs -o size="${shm_size_mb}M" tmpfs /dev/shm
+fi
+
+export SELKIES_PORT=8080
+export SELKIES_ENABLE_HTTPS=true
+export SELKIES_ENABLE_BASIC_AUTH=true
+export SELKIES_BASIC_AUTH_USER="${username}"
+export SELKIES_BASIC_AUTH_PASSWORD="${password}"
+
+# The client decides when to publish microphone/camera. Both remain off when a
+# browser first connects, matching the privacy requirement in the specification.
+export SELKIES_AUDIO_ENABLED=true
+export SELKIES_MICROPHONE_ENABLED=true
+export SELKIES_WEBCAM_ENABLED=true
+export SELKIES_MICROPHONE_ON_START=false
+export SELKIES_WEBCAM_ON_START=false
+export SELKIES_GAMEPAD_ENABLED=false
+export SELKIES_COMMAND_ENABLED=false
+
+echo "[meeting-recorder] Starting Phase 0 Selkies session on port 8080."
+echo "[meeting-recorder] /dev/shm target: ${shm_size_mb} MiB."
+echo "[meeting-recorder] Microphone/webcam forwarding enabled but off by default."
+
+exec /init "$@"
