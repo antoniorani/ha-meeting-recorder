@@ -1,0 +1,55 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install YAML parser
+        run: python -m pip install --disable-pip-version-check pyyaml
+
+      - name: Validate YAML
+        run: |
+          python - <<'PY'
+          import pathlib
+          import yaml
+
+          for filename in ("repository.yaml", "meeting-recorder/config.yaml"):
+              path = pathlib.Path(filename)
+              with path.open("r", encoding="utf-8") as handle:
+                  data = yaml.safe_load(handle)
+              if not isinstance(data, dict):
+                  raise SystemExit(f"{filename} must contain a YAML mapping")
+              print(f"{filename}: OK")
+          PY
+
+      - name: Validate entrypoint shell syntax
+        run: bash -n meeting-recorder/rootfs/usr/local/bin/ha-meeting-recorder-entrypoint
+
+      - name: Check required Home Assistant app keys
+        run: |
+          python - <<'PY'
+          import yaml
+
+          with open("meeting-recorder/config.yaml", encoding="utf-8") as handle:
+              config = yaml.safe_load(handle)
+
+          required = {"name", "version", "slug", "description", "arch"}
+          missing = sorted(required - set(config))
+          if missing:
+              raise SystemExit("Missing required keys: " + ", ".join(missing))
+
+          if config["arch"] != ["amd64"]:
+              raise SystemExit("Phase 0 must currently declare amd64 only")
+
+          print("Home Assistant app config: basic checks OK")
+          PY
