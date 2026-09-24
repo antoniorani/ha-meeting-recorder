@@ -11,15 +11,15 @@ Validate that a persistent Selkies desktop/browser session can run as a Home Ass
 | P0-01 | Repository installs in Home Assistant | Meeting Recorder appears as an experimental app |
 | P0-02 | Image builds on target HAOS host | Build completes without architecture errors |
 | P0-03 | Default password guard | App refuses to start until the default password is replaced |
-| P0-04 | Selkies starts | TCP 8080 becomes reachable and Web UI opens |
-| P0-05 | Browser launches | Google Chrome can be started inside the remote desktop |
-| P0-06 | Session survives client close | Closing the client does not terminate desktop/Chrome |
-| P0-07 | Session survives reconnect | Reopening shows the same desktop and browser window |
-| P0-08 | Audio downlink | Remote desktop audio can be heard by the viewing client |
-| P0-09 | Microphone control | Client microphone can be enabled and is off initially |
-| P0-10 | Webcam control | Client webcam can be enabled and is off initially |
-| P0-11 | Client disconnect privacy | After disconnect, no client mic/webcam stream remains attached |
-| P0-12 | Shared memory | Container reports the configured /dev/shm size |
+| P0-04 | Selkies starts | Internal port 8080 becomes reachable through Home Assistant Ingress |
+| P0-05 | Ingress UI | Open Web UI stays inside Home Assistant and displays the Selkies desktop |
+| P0-06 | Browser launches | Google Chrome can be started inside the remote desktop |
+| P0-07 | Session survives client close | Closing/navigating away does not terminate desktop/Chrome |
+| P0-08 | Session survives reconnect | Reopening through Ingress shows the same desktop and browser window |
+| P0-09 | Audio downlink | Remote desktop audio can be heard by the viewing client |
+| P0-10 | Microphone control | Client microphone can be enabled and is off initially |
+| P0-11 | Webcam control | Client webcam can be enabled and is off initially |
+| P0-12 | Client disconnect privacy | After disconnect, no client mic/webcam stream remains attached |\n| P0-13 | Shared memory | Container reports the configured /dev/shm size |
 
 ## Evidence to collect
 
@@ -28,7 +28,7 @@ For the first run, save:
 - Home Assistant version and Home Assistant OS version.
 - App build log if the image fails to build.
 - App runtime log from startup through first successful connection.
-- Whether the browser shows a self-signed certificate warning.
+- Whether Open Web UI remains inside Home Assistant without a certificate warning.
 - Whether audio, microphone and webcam each work.
 - Whether the same Chrome window remains after disconnect/reconnect.
 - Approximate idle CPU and RAM usage once the desktop is stable.
