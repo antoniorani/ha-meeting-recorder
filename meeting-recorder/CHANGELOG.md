@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1
+
+- Fix Phase 0 startup: hand off to Selkies' real `/etc/container-entrypoint.sh` instead of the nonexistent `/init`.
+- Drop from the temporary root wrapper back to the upstream Selkies `ubuntu` user (UID/GID 1000) before starting the session supervisor.
+- Keep root only long enough to read Home Assistant options and resize `/dev/shm`.
+
+
 ## 0.1.0
 
 - Create Home Assistant app repository structure.
