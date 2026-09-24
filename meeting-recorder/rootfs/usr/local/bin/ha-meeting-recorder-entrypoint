@@ -28,18 +28,9 @@ print(value if value is not None else "")
 PY
 }
 
-username="$(read_option selkies_username)"
-password="$(read_option selkies_password)"
 shm_size_mb="$(read_option shm_size_mb)"
 
-username="${username:-meeting-recorder}"
 shm_size_mb="${shm_size_mb:-2048}"
-
-if [[ -z "${password}" || "${password}" == "CHANGE_ME_BEFORE_START" ]]; then
-  echo "[meeting-recorder] Refusing to start with the default Selkies password."
-  echo "[meeting-recorder] Set 'selkies_password' in the app Configuration tab and start again."
-  exit 78
-fi
 
 if ! [[ "${shm_size_mb}" =~ ^[0-9]+$ ]] || (( shm_size_mb < 512 || shm_size_mb > 4096 )); then
   echo "[meeting-recorder] Invalid shm_size_mb. Expected an integer between 512 and 4096."
@@ -58,10 +49,12 @@ else
 fi
 
 export SELKIES_PORT=8080
-export SELKIES_ENABLE_HTTPS=true
-export SELKIES_ENABLE_BASIC_AUTH=true
-export SELKIES_BASIC_AUTH_USER="${username}"
-export SELKIES_BASIC_AUTH_PASSWORD="${password}"
+
+# Home Assistant Ingress terminates HTTPS and authenticates the user. Selkies
+# therefore serves plain HTTP only on the internal add-on network and does not
+# present its own login prompt.
+export SELKIES_ENABLE_HTTPS=false
+export SELKIES_ENABLE_BASIC_AUTH=false
 
 # The client decides when to publish microphone/camera. Both remain off when a
 # browser first connects, matching the privacy requirement in the specification.
@@ -73,7 +66,8 @@ export SELKIES_WEBCAM_ON_START=false
 export SELKIES_GAMEPAD_ENABLED=false
 export SELKIES_COMMAND_ENABLED=false
 
-echo "[meeting-recorder] Starting Phase 0 Selkies session on port 8080."
+echo "[meeting-recorder] Starting Phase 0 Selkies session on internal port 8080."
+echo "[meeting-recorder] Home Assistant Ingress: enabled (TLS/auth handled by Home Assistant)."
 echo "[meeting-recorder] /dev/shm target: ${shm_size_mb} MiB."
 echo "[meeting-recorder] Microphone/webcam forwarding enabled but off by default."
 
@@ -86,10 +80,6 @@ if [[ ! -x /usr/bin/sudo-root ]]; then
   echo "[meeting-recorder] Cannot drop privileges: /usr/bin/sudo-root is missing from the Selkies image."
   exit 70
 fi
-
-# Keep the desktop account password aligned with the configured Selkies
-# credential without ever printing it.
-export PASSWD="${password}"
 
 echo "[meeting-recorder] Handing off to Selkies as ubuntu (uid 1000)."
 
