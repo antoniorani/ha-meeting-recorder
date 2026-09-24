@@ -12,6 +12,8 @@ USER root
 
 COPY rootfs /
 
-RUN chmod 0755 /usr/local/bin/ha-meeting-recorder-entrypoint
+RUN test -x /etc/container-entrypoint.sh && \
+    test -x /usr/bin/sudo-root && \
+    chmod 0755 /usr/local/bin/ha-meeting-recorder-entrypoint
 
 ENTRYPOINT ["/usr/local/bin/ha-meeting-recorder-entrypoint"]

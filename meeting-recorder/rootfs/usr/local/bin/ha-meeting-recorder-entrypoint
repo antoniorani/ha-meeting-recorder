@@ -77,4 +77,20 @@ echo "[meeting-recorder] Starting Phase 0 Selkies session on port 8080."
 echo "[meeting-recorder] /dev/shm target: ${shm_size_mb} MiB."
 echo "[meeting-recorder] Microphone/webcam forwarding enabled but off by default."
 
-exec /init "$@"
+if [[ ! -x /etc/container-entrypoint.sh ]]; then
+  echo "[meeting-recorder] Upstream Selkies entrypoint not found at /etc/container-entrypoint.sh."
+  exit 70
+fi
+
+if [[ ! -x /usr/bin/sudo-root ]]; then
+  echo "[meeting-recorder] Cannot drop privileges: /usr/bin/sudo-root is missing from the Selkies image."
+  exit 70
+fi
+
+# Keep the desktop account password aligned with the configured Selkies
+# credential without ever printing it.
+export PASSWD="${password}"
+
+echo "[meeting-recorder] Handing off to Selkies as ubuntu (uid 1000)."
+
+exec /usr/bin/sudo-root -E -H -u ubuntu -- /etc/container-entrypoint.sh "$@"
