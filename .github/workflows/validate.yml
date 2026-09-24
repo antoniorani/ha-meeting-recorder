@@ -51,5 +51,17 @@ jobs:
           if config["arch"] != ["amd64"]:
               raise SystemExit("Phase 0 must currently declare amd64 only")
 
+          if config.get("ingress") is not True:
+              raise SystemExit("Meeting Recorder must use Home Assistant Ingress")
+
+          if config.get("ingress_port") != 8080:
+              raise SystemExit("Ingress must target Selkies internal port 8080")
+
+          if "webui" in config:
+              raise SystemExit("Direct webui must not be configured when using Ingress")
+
+          if config.get("ports"):
+              raise SystemExit("Phase 0 Ingress build must not publish Selkies ports")
+
           print("Home Assistant app config: basic checks OK")
           PY
