@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.0
+
+- Remove Whisper/Wyoming and all transcription responsibilities from Meeting Recorder.
+- Remove transcription configuration, worker code, UI states and retry controls.
+- Keep the persistent Google Chrome profile introduced in 0.5.0.
+- Stop writing per-recording `session.json` files.
+- Keep runtime state only in the app-private `/data/meeting-recorder/state.json`.
+- Treat the final `audio.opus` itself as the only completion contract for downstream consumers.
+- Assemble into a hidden temporary audio file, validate it with ffprobe, and atomically rename it to `audio.opus` only after successful finalization.
+- A recording directory without `audio.opus` is therefore incomplete; a directory with `audio.opus` contains a finalized, validated recording.
+
+
 ## 0.5.0
 
 - Persist the Google Chrome profile under `/data/chrome-profile/google-chrome` so browser preferences, cookies, site permissions, extensions and session state survive add-on restarts and future image updates.
