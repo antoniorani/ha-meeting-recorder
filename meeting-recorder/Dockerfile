@@ -15,6 +15,11 @@ RUN apt-get update && \
     apt-get install --no-install-recommends -y \
       nginx \
       pulseaudio-utils && \
+    python3 -m pip install \
+      --disable-pip-version-check \
+      --no-cache-dir \
+      --target /opt/meeting-recorder-python \
+      "wyoming==1.10.2" && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /var/cache/debconf/* /tmp/* /var/tmp/*
 
@@ -26,6 +31,7 @@ RUN test -x /etc/container-entrypoint.sh && \
     command -v ffprobe >/dev/null 2>&1 && \
     command -v pactl >/dev/null 2>&1 && \
     command -v nginx >/dev/null 2>&1 && \
+    PYTHONPATH=/opt/meeting-recorder-python python3 -c 'import wyoming' && \
     chmod 0755 \
       /usr/local/bin/ha-meeting-recorder-entrypoint \
       /usr/local/bin/meeting-recorder-api
