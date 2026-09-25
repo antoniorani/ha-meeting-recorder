@@ -1,5 +1,5 @@
 name: "Meeting Recorder"
-version: "0.5.0"
+version: "0.5.1"
 slug: "meeting_recorder"
 description: "Persistent meeting browser with audio recording and post-meeting transcription"
 url: "https://github.com/antoniorani/ha-meeting-recorder"
@@ -31,6 +31,7 @@ options:
   whisper_language: "auto"
   whisper_connect_timeout_seconds: 10
   whisper_read_timeout_seconds: 1800
+  whisper_chunk_seconds: 60
 schema:
   shm_size_mb: "int(512,4096)"
   segment_seconds: "int(30,1800)"
@@ -41,3 +42,4 @@ schema:
   whisper_language: "str(1,32)"
   whisper_connect_timeout_seconds: "int(1,60)"
   whisper_read_timeout_seconds: "int(60,7200)"
+  whisper_chunk_seconds: "int(15,300)"
