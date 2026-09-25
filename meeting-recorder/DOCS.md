@@ -1,8 +1,8 @@
-# Meeting Recorder — Phase 3 recording prototype
+# Meeting Recorder — Phase 4 finalization prototype
 
 The persistent Selkies browser, Home Assistant Ingress, audio downlink, microphone forwarding and webcam forwarding have already been validated on the target HAOS host.
 
-Version **0.3.0** adds the first real Meeting Recorder function: **on-demand audio recording**.
+Version **0.4.0** keeps the validated on-demand audio recording and adds the complete manual/programmed finalization flow.
 
 ## Normal flow
 
@@ -11,8 +11,10 @@ Version **0.3.0** adds the first real Meeting Recorder function: **on-demand aud
 3. Navigate to Jitsi, Meet, Teams, Webex or another compatible meeting site and join the meeting yourself.
 4. When you want the recording to begin, press **Iniciar grabación** in the floating Meeting Recorder control bar.
 5. You may navigate away from Home Assistant; Selkies, Chromium and FFmpeg continue running in the add-on.
-6. Return later and press **Detener grabación**.
-7. The add-on closes the current segment, assembles all segments and validates the final audio.
+6. Optionally choose a date/time and press **Programar fin**. The add-on keeps that deadline server-side even if you close Home Assistant.
+7. To end manually, press **Finalizar reunión y grabación**.
+8. Meeting Recorder closes the Chrome meeting participant, closes the current audio segment, assembles the recording and validates the final audio.
+9. If the scheduled time arrives first, exactly the same finalization flow runs automatically.
 
 This version does **not** navigate to a meeting, fill Meeting IDs/PINs or use Playwright.
 
@@ -110,8 +112,6 @@ If recording fails, capture the add-on log and, when available, the session's `f
 
 ## Not implemented yet
 
-- “Finalizar reunión y grabación” as one atomic action.
-- Scheduled end time.
 - Automatic Whisper/Wyoming transcription.
 - Recovery/assembly after a hard host crash beyond preserving already closed segments.
 - Recording history UI.
