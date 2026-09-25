@@ -659,7 +659,9 @@ class Recorder:
             if running:
                 self.stop()
             else:
-                self._persist_current_state()
+                # Do not overwrite the previous completed session metadata when
+                # finalizing a browser-only session.
+                self._write_json(STATE_FILE, self._metadata("ready"))
 
             data = self.status()
             data["finalize_reason"] = reason
