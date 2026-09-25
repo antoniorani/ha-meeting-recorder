@@ -10,9 +10,9 @@ Experimental Home Assistant OS app for a persistent remote browser session that 
 
 ## Current status
 
-**Phase 3 recording prototype.**
+**Phase 5: persistent Chrome + automatic post-meeting transcription.**
 
-The persistent-browser spike has passed on the target HAOS host. The current build adds on-demand, segmented **audio-only recording** while keeping meeting access manual and platform-independent. Automatic transcription is not wired yet.
+The persistent browser, Ingress, audio/video forwarding, audio-only recording and manual/scheduled finalization have all been validated on the target HAOS host. The current build adds a persistent Google Chrome profile and automatic post-meeting transcription through the existing Home Assistant Whisper/Wyoming service.
 
 Validated foundation:
 
