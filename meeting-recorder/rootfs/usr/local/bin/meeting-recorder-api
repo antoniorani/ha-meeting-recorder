@@ -23,7 +23,8 @@ HOST = "127.0.0.1"
 PORT = 8099
 OPTIONS = Path("/data/options.json")
 MEDIA_ROOT = Path("/media/meeting-recorder")
-STATE_FILE = Path("/data/meeting-recorder-state.json")
+STATE_DIR = Path("/data/meeting-recorder")
+STATE_FILE = STATE_DIR / "state.json"
 MIX_SINK = "meeting_recorder_mix"
 MIX_MONITOR = f"{MIX_SINK}.monitor"
 MIC_NAMES = ("SelkiesVirtualMic", "output.SelkiesVirtualMic")
@@ -549,6 +550,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
     log(f"Control API listening on {HOST}:{PORT}.")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
 
