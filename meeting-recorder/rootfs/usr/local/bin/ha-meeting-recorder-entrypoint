@@ -2,6 +2,8 @@
 set -euo pipefail
 
 OPTIONS_FILE="/data/options.json"
+RUNTIME_DIR="/tmp/runtime-ubuntu"
+MEDIA_DIR="/media/meeting-recorder"
 
 read_option() {
   local key="$1"
@@ -29,7 +31,6 @@ PY
 }
 
 shm_size_mb="$(read_option shm_size_mb)"
-
 shm_size_mb="${shm_size_mb:-2048}"
 
 if ! [[ "${shm_size_mb}" =~ ^[0-9]+$ ]] || (( shm_size_mb < 512 || shm_size_mb > 4096 )); then
@@ -37,10 +38,6 @@ if ! [[ "${shm_size_mb}" =~ ^[0-9]+$ ]] || (( shm_size_mb < 512 || shm_size_mb >
   exit 78
 fi
 
-# Selkies recommends a substantially larger /dev/shm than Docker's usual 64 MiB.
-# Home Assistant does not expose Docker's --shm-size directly, so this Phase 0
-# spike remounts /dev/shm inside the container. SYS_ADMIN is intentionally
-# temporary and must be removed or replaced before the MVP is considered hardened.
 if grep -qs ' /dev/shm ' /proc/mounts; then
   mount -o remount,size="${shm_size_mb}M" /dev/shm
 else
@@ -48,18 +45,17 @@ else
   mount -t tmpfs -o size="${shm_size_mb}M" tmpfs /dev/shm
 fi
 
-export SELKIES_PORT=8080
+# Output files are user-visible through Home Assistant's /media mapping.
+mkdir -p "${MEDIA_DIR}"
+chown 1000:1000 "${MEDIA_DIR}"
 
-# Home Assistant Ingress terminates HTTPS and authenticates the user. Selkies
-# therefore serves plain HTTP only on the internal add-on network and does not
-# present its own login prompt.
+# Nginx owns the Home Assistant Ingress port. Selkies stays private behind it.
+export SELKIES_PORT=8081
 export SELKIES_ENABLE_HTTPS=false
 export SELKIES_ENABLE_BASIC_AUTH=false
 
-# Expose stable virtual capture devices to applications in the remote desktop,
-# but only request the real client microphone/camera while an application is
-# actively reading them. This avoids Jitsi/Meet seeing "None" while preserving
-# disconnect safety: without a connected capture candidate Selkies releases uplink.
+# Stable virtual capture devices, but physical client devices are requested
+# only while the remote application actually uses them.
 export SELKIES_AUDIO_ENABLED=true
 export SELKIES_MICROPHONE_ENABLED=true
 export SELKIES_WEBCAM_ENABLED=true
@@ -68,21 +64,36 @@ export SELKIES_WEBCAM_ON_START=demand
 export SELKIES_GAMEPAD_ENABLED=false
 export SELKIES_COMMAND_ENABLED=false
 
-echo "[meeting-recorder] Starting Phase 0 Selkies session on internal port 8080."
-echo "[meeting-recorder] Home Assistant Ingress: enabled (TLS/auth handled by Home Assistant)."
-echo "[meeting-recorder] /dev/shm target: ${shm_size_mb} MiB."
-echo "[meeting-recorder] Microphone/webcam capture policy: demand (virtual devices visible; client devices requested only while used)."
-
 if [[ ! -x /etc/container-entrypoint.sh ]]; then
-  echo "[meeting-recorder] Upstream Selkies entrypoint not found at /etc/container-entrypoint.sh."
+  echo "[meeting-recorder] Upstream Selkies entrypoint not found."
   exit 70
 fi
-
 if [[ ! -x /usr/bin/sudo-root ]]; then
-  echo "[meeting-recorder] Cannot drop privileges: /usr/bin/sudo-root is missing from the Selkies image."
+  echo "[meeting-recorder] Upstream sudo helper not found."
   exit 70
 fi
 
-echo "[meeting-recorder] Handing off to Selkies as ubuntu (uid 1000)."
+echo "[meeting-recorder] /dev/shm target: ${shm_size_mb} MiB."
+echo "[meeting-recorder] Selkies internal port: 8081."
+echo "[meeting-recorder] Meeting Recorder gateway/API ingress port: 8080."
+echo "[meeting-recorder] Recordings directory: ${MEDIA_DIR}."
 
+nginx -t
+nginx
+
+# The API runs as the same desktop user as PipeWire/Pulse. It may start before
+# the audio server; individual recording requests wait for audio readiness.
+export XDG_RUNTIME_DIR="${RUNTIME_DIR}"
+export PULSE_SERVER="unix:${RUNTIME_DIR}/pulse/native"
+
+/usr/bin/sudo-root -E -H -u ubuntu -- /usr/local/bin/meeting-recorder-api &
+API_PID=$!
+
+cleanup() {
+  kill "${API_PID}" 2>/dev/null || true
+  nginx -s quit 2>/dev/null || true
+}
+trap cleanup EXIT TERM INT
+
+echo "[meeting-recorder] Starting persistent Selkies desktop."
 exec /usr/bin/sudo-root -E -H -u ubuntu -- /etc/container-entrypoint.sh "$@"
