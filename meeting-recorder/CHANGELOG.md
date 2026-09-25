@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0
+
+- Replace the primary stop control with **Finalizar reunión y grabación**.
+- Add a generic meeting finalization endpoint that closes the persistent Chrome participant without any platform-specific DOM automation.
+- Finalize any active recording through the same action before returning to the ready state.
+- Add a configurable scheduled end time from the Ingress UI.
+- Execute the same finalization pipeline when the scheduled time is reached, even if no client is connected.
+- Allow changing or cancelling the scheduled end while recording.
+- Report browser-running state and scheduled end time through the control API.
+
+
 ## 0.3.1
 
 - Fix recording start failure on HAOS when the API runs as the non-root `ubuntu` user.

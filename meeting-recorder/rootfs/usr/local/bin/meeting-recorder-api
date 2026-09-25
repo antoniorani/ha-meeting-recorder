@@ -28,6 +28,7 @@ STATE_FILE = STATE_DIR / "state.json"
 MIX_SINK = "meeting_recorder_mix"
 MIX_MONITOR = f"{MIX_SINK}.monitor"
 MIC_NAMES = ("SelkiesVirtualMic", "output.SelkiesVirtualMic")
+CHROME_MARKERS = ("/opt/google/chrome/chrome", "/opt/google/chrome/google-chrome")
 
 
 def log(message: str) -> None:
@@ -163,6 +164,81 @@ def cleanup_stale_graph() -> None:
         unload_module(module_id)
 
 
+def chrome_pids() -> list[int]:
+    """Return Chrome process IDs owned by the desktop user (uid 1000)."""
+    found: list[int] = []
+    proc_root = Path("/proc")
+    for entry in proc_root.iterdir():
+        if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        try:
+            status = (entry / "status").read_text(encoding="utf-8", errors="replace")
+            uid_line = next(line for line in status.splitlines() if line.startswith("Uid:"))
+            real_uid = int(uid_line.split()[1])
+            if real_uid != 1000:
+                continue
+
+            cmdline = (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", errors="replace")
+            try:
+                exe = os.readlink(entry / "exe")
+            except OSError:
+                exe = ""
+
+            if any(marker in cmdline or marker == exe for marker in CHROME_MARKERS):
+                found.append(pid)
+        except (OSError, StopIteration, ValueError):
+            continue
+    return sorted(set(found))
+
+
+def terminate_chrome(timeout: float = 6.0) -> dict[str, Any]:
+    """Gracefully terminate the persistent Chrome meeting participant."""
+    initial = chrome_pids()
+    if not initial:
+        return {"found": 0, "terminated": 0, "killed": 0}
+
+    for pid in initial:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        remaining = [pid for pid in initial if Path(f"/proc/{pid}").exists()]
+        if not remaining:
+            return {"found": len(initial), "terminated": len(initial), "killed": 0}
+        time.sleep(0.15)
+
+    remaining = [pid for pid in initial if Path(f"/proc/{pid}").exists()]
+    for pid in remaining:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    return {
+        "found": len(initial),
+        "terminated": len(initial) - len(remaining),
+        "killed": len(remaining),
+    }
+
+
+def parse_scheduled_time(value: str) -> tuple[str, float]:
+    """Validate an RFC3339 timestamp and return canonical UTC ISO + epoch."""
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("scheduled_end_at must be an RFC3339 timestamp") from exc
+    if parsed.tzinfo is None:
+        raise ValueError("scheduled_end_at must include a timezone")
+    epoch = parsed.timestamp()
+    if epoch <= time.time() + 1:
+        raise ValueError("scheduled_end_at must be in the future")
+    utc = parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return utc, epoch
+
+
 class Recorder:
     def __init__(self) -> None:
         self.lock = threading.RLock()
@@ -179,7 +255,16 @@ class Recorder:
         self.warnings: list[str] = []
         self.watcher_stop = threading.Event()
         self.watcher: Optional[threading.Thread] = None
+        self.scheduled_end_at: Optional[str] = None
+        self.scheduled_end_epoch: Optional[float] = None
+        self.scheduler_stop = threading.Event()
         self._restore_state()
+        self.scheduler = threading.Thread(
+            target=self._scheduler_loop,
+            name="meeting-recorder-scheduler",
+            daemon=True,
+        )
+        self.scheduler.start()
 
     def _restore_state(self) -> None:
         try:
@@ -212,6 +297,7 @@ class Recorder:
             "audio_path": str(self.session_dir / "audio.opus") if self.session_dir else None,
             "warnings": list(self.warnings),
             "last_error": self.last_error,
+            "scheduled_end_at": self.scheduled_end_at,
             "updated_at": iso_now(),
         }
 
@@ -221,9 +307,56 @@ class Recorder:
             data = self._metadata("recording" if running else "ready")
             data["recording"] = running
             data["audio_ready"] = audio_ready()
+            browser = chrome_pids()
+            data["browser_running"] = bool(browser)
+            data["browser_processes"] = len(browser)
             if self.last_completed is not None:
                 data["last_completed"] = self.last_completed
             return data
+
+    def _persist_current_state(self) -> None:
+        running = self.ffmpeg is not None and self.ffmpeg.poll() is None
+        data = self._metadata("recording" if running else "ready")
+        self._write_json(STATE_FILE, data)
+        if self.session_dir is not None:
+            self._write_json(self.session_dir / "session.json", data)
+
+    def _scheduler_loop(self) -> None:
+        while not self.scheduler_stop.wait(0.5):
+            due = False
+            with self.lock:
+                if self.scheduled_end_epoch is not None and time.time() >= self.scheduled_end_epoch:
+                    # Clear before executing so a slow finalization cannot fire twice.
+                    self.scheduled_end_epoch = None
+                    due = True
+            if not due:
+                continue
+            log("Scheduled end time reached; finalizing meeting and recording.")
+            try:
+                self.finalize_meeting(reason="scheduled")
+            except Exception as exc:
+                self.last_error = str(exc)
+                log(f"Scheduled finalization failed: {exc}")
+
+    def set_end_time(self, value: str) -> dict[str, Any]:
+        with self.lock:
+            running = self.ffmpeg is not None and self.ffmpeg.poll() is None
+            if not running:
+                raise RuntimeError("A scheduled end time can only be set while recording")
+            canonical, epoch = parse_scheduled_time(value)
+            self.scheduled_end_at = canonical
+            self.scheduled_end_epoch = epoch
+            self._persist_current_state()
+            log(f"Scheduled meeting end set to {canonical}.")
+            return self.status()
+
+    def cancel_end_time(self) -> dict[str, Any]:
+        with self.lock:
+            self.scheduled_end_at = None
+            self.scheduled_end_epoch = None
+            self._persist_current_state()
+            log("Scheduled meeting end cancelled.")
+            return self.status()
 
     def diagnostics(self) -> dict[str, Any]:
         try:
@@ -287,6 +420,8 @@ class Recorder:
 
             self.last_error = None
             self.warnings = []
+            self.scheduled_end_at = None
+            self.scheduled_end_epoch = None
             wait_for_audio()
             cleanup_stale_graph()
 
@@ -505,12 +640,40 @@ class Recorder:
                 self.started_monotonic = None
             return self.status()
 
+    def finalize_meeting(self, reason: str = "manual") -> dict[str, Any]:
+        """End the generic browser participant and finalize any active recording."""
+        with self.lock:
+            self.scheduled_end_at = None
+            self.scheduled_end_epoch = None
+
+            browser_result = terminate_chrome()
+            if browser_result["found"]:
+                log(
+                    "Chrome meeting participant closed "
+                    f"(found={browser_result['found']}, killed={browser_result['killed']})."
+                )
+            else:
+                log("No Chrome meeting participant was running.")
+
+            running = self.ffmpeg is not None and self.ffmpeg.poll() is None
+            if running:
+                self.stop()
+            else:
+                # Do not overwrite the previous completed session metadata when
+                # finalizing a browser-only session.
+                self._write_json(STATE_FILE, self._metadata("ready"))
+
+            data = self.status()
+            data["finalize_reason"] = reason
+            data["browser_close"] = browser_result
+            return data
+
 
 RECORDER = Recorder()
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "MeetingRecorder/0.3"
+    server_version = "MeetingRecorder/0.4"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         log(fmt % args)
@@ -523,6 +686,19 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
+
+    def _read_json(self) -> dict[str, Any]:
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        if length <= 0:
+            return {}
+        raw = self.rfile.read(length)
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except Exception as exc:
+            raise ValueError("invalid JSON body") from exc
+        if not isinstance(data, dict):
+            raise ValueError("JSON body must be an object")
+        return data
 
     def do_GET(self) -> None:
         if self.path == "/status":
@@ -540,6 +716,35 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, RECORDER.start())
             elif self.path == "/recording/stop":
                 self._json(200, RECORDER.stop())
+            elif self.path == "/meeting/stop":
+                self._json(200, RECORDER.finalize_meeting(reason="manual"))
+            else:
+                self._json(404, {"error": "not_found"})
+        except Exception as exc:
+            log(f"API error on {self.path}: {exc}")
+            RECORDER.last_error = str(exc)
+            self._json(500, {"error": str(exc), "status": RECORDER.status()})
+
+
+    def do_PUT(self) -> None:
+        try:
+            if self.path == "/meeting/end-time":
+                body = self._read_json()
+                value = str(body.get("scheduled_end_at", "")).strip()
+                if not value:
+                    raise ValueError("scheduled_end_at is required")
+                self._json(200, RECORDER.set_end_time(value))
+            else:
+                self._json(404, {"error": "not_found"})
+        except Exception as exc:
+            log(f"API error on {self.path}: {exc}")
+            RECORDER.last_error = str(exc)
+            self._json(400, {"error": str(exc), "status": RECORDER.status()})
+
+    def do_DELETE(self) -> None:
+        try:
+            if self.path == "/meeting/end-time":
+                self._json(200, RECORDER.cancel_end_time())
             else:
                 self._json(404, {"error": "not_found"})
         except Exception as exc:

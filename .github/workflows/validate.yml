@@ -107,5 +107,23 @@ jobs:
               if required not in entry:
                   raise SystemExit(f"Missing writable recorder state setup: {required}")
 
-          print("Selkies capture, gateway and state-directory policy: OK")
+          api = Path("meeting-recorder/rootfs/usr/local/bin/meeting-recorder-api").read_text(encoding="utf-8")
+          required_api = (
+              'def finalize_meeting(',
+              'def set_end_time(',
+              'def cancel_end_time(',
+              '"/meeting/stop"',
+              '"/meeting/end-time"',
+              'CHROME_MARKERS',
+          )
+          missing_api = [item for item in required_api if item not in api]
+          if missing_api:
+              raise SystemExit("Missing finalization/scheduler API pieces: " + ", ".join(missing_api))
+
+          controls = Path("meeting-recorder/rootfs/usr/local/share/meeting-recorder/controls.js").read_text(encoding="utf-8")
+          for required in ("Finalizar reunión y grabación", "Programar fin", "meeting/end-time", "meeting/stop"):
+              if required not in controls:
+                  raise SystemExit(f"Missing UI finalization control: {required}")
+
+          print("Selkies capture, gateway, state-directory and finalization policy: OK")
           PY
