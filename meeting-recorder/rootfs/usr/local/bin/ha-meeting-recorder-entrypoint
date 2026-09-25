@@ -56,20 +56,22 @@ export SELKIES_PORT=8080
 export SELKIES_ENABLE_HTTPS=false
 export SELKIES_ENABLE_BASIC_AUTH=false
 
-# The client decides when to publish microphone/camera. Both remain off when a
-# browser first connects, matching the privacy requirement in the specification.
+# Expose stable virtual capture devices to applications in the remote desktop,
+# but only request the real client microphone/camera while an application is
+# actively reading them. This avoids Jitsi/Meet seeing "None" while preserving
+# disconnect safety: without a connected capture candidate Selkies releases uplink.
 export SELKIES_AUDIO_ENABLED=true
 export SELKIES_MICROPHONE_ENABLED=true
 export SELKIES_WEBCAM_ENABLED=true
-export SELKIES_MICROPHONE_ON_START=false
-export SELKIES_WEBCAM_ON_START=false
+export SELKIES_MICROPHONE_ON_START=demand
+export SELKIES_WEBCAM_ON_START=demand
 export SELKIES_GAMEPAD_ENABLED=false
 export SELKIES_COMMAND_ENABLED=false
 
 echo "[meeting-recorder] Starting Phase 0 Selkies session on internal port 8080."
 echo "[meeting-recorder] Home Assistant Ingress: enabled (TLS/auth handled by Home Assistant)."
 echo "[meeting-recorder] /dev/shm target: ${shm_size_mb} MiB."
-echo "[meeting-recorder] Microphone/webcam forwarding enabled but off by default."
+echo "[meeting-recorder] Microphone/webcam capture policy: demand (virtual devices visible; client devices requested only while used)."
 
 if [[ ! -x /etc/container-entrypoint.sh ]]; then
   echo "[meeting-recorder] Upstream Selkies entrypoint not found at /etc/container-entrypoint.sh."
