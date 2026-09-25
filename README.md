@@ -1,26 +1,23 @@
 # HA Meeting Recorder
 
-Experimental Home Assistant OS app for a persistent remote browser session that will eventually:
+Experimental Home Assistant OS app for a persistent remote browser session that:
 
-- stay connected to a web meeting even when the Home Assistant UI is closed;
-- forward microphone and webcam only while the client is attached and explicitly enables them;
-- record audio only;
-- finalize the meeting manually or at a scheduled time;
-- transcribe the finished recording locally with the existing Home Assistant Whisper/Wyoming service.
+- stays connected to a web meeting even when the Home Assistant UI is closed;
+- lets the user join any compatible meeting manually in Google Chrome;
+- forwards microphone and webcam to that persistent browser session;
+- records **audio only**;
+- finalizes the meeting manually or at a scheduled time;
+- persists the Google Chrome profile across app restarts and updates.
 
 ## Current status
 
-**Phase 5: persistent Chrome + automatic post-meeting transcription.**
+**Recording-only architecture.**
 
-The persistent browser, Ingress, audio/video forwarding, audio-only recording and manual/scheduled finalization have all been validated on the target HAOS host. The current build adds a persistent Google Chrome profile and automatic post-meeting transcription through the existing Home Assistant Whisper/Wyoming service.
+The persistent browser, Ingress, audio/video forwarding, audio-only recording, manual/scheduled finalization and Chrome-profile persistence have been validated on the target HAOS host.
 
-Validated foundation:
+Transcription is deliberately **outside this app**. Meeting Recorder's output contract is a finalized `audio.opus` in the session directory. Downstream transcription or processing can consume that file independently.
 
-1. Home Assistant can build and run a Selkies desktop container.
-2. The remote desktop opens through Home Assistant Ingress in the same Home Assistant tab.
-3. The desktop/browser process survives closing and reopening the client UI.
-4. Microphone and webcam forwarding can be enabled from the Selkies client.
-5. Disconnecting the client does not terminate the server-side session.
+A final `audio.opus` is published only after assembly and ffprobe validation, using an atomic rename. No per-recording JSON marker is required.
 
 The app currently supports **amd64 only**.
 
@@ -40,11 +37,11 @@ docs/
 
 ## Security note
 
-The Phase 0 spike temporarily requests `SYS_ADMIN` and disables AppArmor so it can enlarge `/dev/shm` inside the container. Selkies recommends a much larger shared-memory allocation than Docker's normal 64 MiB for browser stability.
-
-This is an explicit prototype compromise, not the desired final security posture. The capability must be removed or replaced before the MVP is considered hardened.
+The current prototype temporarily requests `SYS_ADMIN` and disables AppArmor so it can enlarge `/dev/shm` inside the container. This must be removed or replaced before the MVP is considered hardened.
 
 The browser-facing UI is served through **Home Assistant Ingress**. Home Assistant handles authentication and HTTPS; Selkies listens only on its internal HTTP port and that port is not published on the HAOS host.
+
+The persistent Chrome profile may contain authenticated cookies/session data. Backups containing Meeting Recorder app data should be treated accordingly.
 
 ## License
 
