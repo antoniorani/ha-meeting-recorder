@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Meeting Recorder control API and audio recorder.
 
-This service intentionally has no third-party Python dependencies. Nginx keeps it
-private behind Home Assistant Ingress. Selkies owns the desktop; this process
-only controls the recording audio graph and FFmpeg.
+Nginx keeps this service private behind Home Assistant Ingress. Selkies owns the
+desktop; this process controls the recording audio graph, FFmpeg, meeting
+finalization and the lifecycle of post-meeting transcription jobs.
 """
 from __future__ import annotations
 
@@ -258,6 +258,9 @@ class Recorder:
         self.scheduled_end_at: Optional[str] = None
         self.scheduled_end_epoch: Optional[float] = None
         self.scheduler_stop = threading.Event()
+        self.transcriber: Optional[subprocess.Popen[str]] = None
+        self.transcription_log = None
+        self.transcription_session_dir: Optional[Path] = None
         self._restore_state()
         self.scheduler = threading.Thread(
             target=self._scheduler_loop,
@@ -276,6 +279,26 @@ class Recorder:
             old["interrupted_at"] = iso_now()
             self.last_completed = old
             self._write_json(STATE_FILE, old)
+        elif old.get("directory"):
+            self.last_completed = old
+            self.session_id = old.get("session_id")
+            try:
+                self.session_dir = Path(str(old["directory"]))
+            except Exception:
+                self.session_dir = None
+
+        session_dir = self.session_dir
+        if session_dir is not None:
+            transcription_state = session_dir / "transcription.json"
+            try:
+                transcription = json.loads(transcription_state.read_text(encoding="utf-8"))
+            except Exception:
+                transcription = None
+            if isinstance(transcription, dict) and transcription.get("state") == "running":
+                transcription["state"] = "error"
+                transcription["error"] = "Transcription interrupted by add-on restart/update"
+                transcription["finished_at"] = iso_now()
+                self._write_json(transcription_state, transcription)
 
     @staticmethod
     def _write_json(path: Path, data: dict[str, Any]) -> None:
@@ -298,8 +321,108 @@ class Recorder:
             "warnings": list(self.warnings),
             "last_error": self.last_error,
             "scheduled_end_at": self.scheduled_end_at,
+            "transcription": self._transcription_status(),
             "updated_at": iso_now(),
         }
+
+    def _transcription_running(self) -> bool:
+        proc = self.transcriber
+        if proc is None:
+            return False
+        if proc.poll() is None:
+            return True
+        if self.transcription_log is not None:
+            self.transcription_log.close()
+            self.transcription_log = None
+        self.transcriber = None
+        return False
+
+    def _transcription_status(self) -> dict[str, Any]:
+        session_dir = self.transcription_session_dir or self.session_dir
+        if session_dir is None and self.last_completed:
+            directory = self.last_completed.get("directory")
+            if directory:
+                session_dir = Path(str(directory))
+
+        if session_dir is not None:
+            status_file = session_dir / "transcription.json"
+            try:
+                data = json.loads(status_file.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    if self._transcription_running():
+                        data["state"] = "running"
+                    return data
+            except Exception:
+                pass
+
+        options = read_options()
+        enabled = bool(options.get("whisper_enabled", True))
+        if self._transcription_running():
+            return {
+                "state": "running",
+                "enabled": enabled,
+                "updated_at": iso_now(),
+            }
+        return {
+            "state": "disabled" if not enabled else "idle",
+            "enabled": enabled,
+        }
+
+    def _start_transcription(self, session_dir: Path, *, retry: bool = False) -> None:
+        options = read_options()
+        if not bool(options.get("whisper_enabled", True)):
+            status = {
+                "state": "disabled",
+                "enabled": False,
+                "updated_at": iso_now(),
+            }
+            self._write_json(session_dir / "transcription.json", status)
+            log("Whisper transcription disabled by configuration.")
+            return
+
+        if self._transcription_running():
+            raise RuntimeError("A transcription is already running")
+
+        audio_path = session_dir / "audio.opus"
+        if not audio_path.exists():
+            raise RuntimeError("Cannot transcribe: final audio.opus does not exist")
+
+        log_path = session_dir / "transcription.log"
+        self.transcription_log = log_path.open("a", encoding="utf-8")
+        env = os.environ.copy()
+        self.transcriber = subprocess.Popen(
+            [
+                "/usr/local/bin/meeting-recorder-transcribe",
+                str(session_dir),
+            ],
+            stdout=self.transcription_log,
+            stderr=subprocess.STDOUT,
+            text=True,
+            start_new_session=True,
+            env=env,
+        )
+        self.transcription_session_dir = session_dir
+        action = "retried" if retry else "started"
+        log(f"Whisper transcription {action}: {session_dir}")
+
+    def retry_transcription(self) -> dict[str, Any]:
+        with self.lock:
+            running = self.ffmpeg is not None and self.ffmpeg.poll() is None
+            if running:
+                raise RuntimeError("Cannot transcribe while recording is active")
+            if self._transcription_running():
+                return self.status()
+
+            session_dir = self.session_dir
+            if session_dir is None and self.last_completed:
+                directory = self.last_completed.get("directory")
+                if directory:
+                    session_dir = Path(str(directory))
+            if session_dir is None:
+                raise RuntimeError("No completed recording is available for transcription")
+
+            self._start_transcription(session_dir, retry=True)
+            return self.status()
 
     def status(self) -> dict[str, Any]:
         with self.lock:
@@ -417,6 +540,8 @@ class Recorder:
         with self.lock:
             if self.ffmpeg is not None and self.ffmpeg.poll() is None:
                 return self.status()
+            if self._transcription_running():
+                raise RuntimeError("Wait for Whisper transcription to finish before starting a new recording")
 
             self.last_error = None
             self.warnings = []
@@ -629,6 +754,8 @@ class Recorder:
                 completed = self._finalize()
                 self.last_completed = completed
                 log(f"Recording finalized: {completed.get('audio_path')}")
+                if self.session_dir is not None:
+                    self._start_transcription(self.session_dir)
             except Exception as exc:
                 self.last_error = str(exc)
                 failed = self._metadata("error")
@@ -673,7 +800,7 @@ RECORDER = Recorder()
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "MeetingRecorder/0.4"
+    server_version = "MeetingRecorder/0.5"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         log(fmt % args)
@@ -718,6 +845,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, RECORDER.stop())
             elif self.path == "/meeting/stop":
                 self._json(200, RECORDER.finalize_meeting(reason="manual"))
+            elif self.path == "/transcription/retry":
+                self._json(200, RECORDER.retry_transcription())
             else:
                 self._json(404, {"error": "not_found"})
         except Exception as exc:

@@ -5,6 +5,10 @@ OPTIONS_FILE="/data/options.json"
 RUNTIME_DIR="/tmp/runtime-ubuntu"
 MEDIA_DIR="/media/meeting-recorder"
 STATE_DIR="/data/meeting-recorder"
+CHROME_PROFILE_ROOT="/data/chrome-profile"
+CHROME_PROFILE_DIR="${CHROME_PROFILE_ROOT}/google-chrome"
+CHROME_CONFIG_DIR="/home/ubuntu/.config"
+CHROME_CONFIG_PATH="${CHROME_CONFIG_DIR}/google-chrome"
 
 read_option() {
   local key="$1"
@@ -57,6 +61,33 @@ mkdir -p "${STATE_DIR}"
 chown 1000:1000 "${STATE_DIR}"
 chmod 0750 "${STATE_DIR}"
 
+# Persist the complete Google Chrome profile across add-on restarts and image
+# updates. Chrome stores preferences, cookies, site permissions, extensions and
+# session state below ~/.config/google-chrome on Linux.
+mkdir -p "${CHROME_PROFILE_DIR}" "${CHROME_CONFIG_DIR}"
+if [[ ! -f "${CHROME_PROFILE_ROOT}/.initialized" ]]; then
+  if [[ -d "${CHROME_CONFIG_PATH}" && ! -L "${CHROME_CONFIG_PATH}" ]]; then
+    cp -a "${CHROME_CONFIG_PATH}/." "${CHROME_PROFILE_DIR}/" 2>/dev/null || true
+  fi
+  chown -R 1000:1000 "${CHROME_PROFILE_ROOT}"
+  touch "${CHROME_PROFILE_ROOT}/.initialized"
+  chown 1000:1000 "${CHROME_PROFILE_ROOT}/.initialized"
+fi
+if [[ -e "${CHROME_CONFIG_PATH}" || -L "${CHROME_CONFIG_PATH}" ]]; then
+  rm -rf "${CHROME_CONFIG_PATH}"
+fi
+ln -s "${CHROME_PROFILE_DIR}" "${CHROME_CONFIG_PATH}"
+chown -h 1000:1000 "${CHROME_CONFIG_PATH}"
+chown 1000:1000 "${CHROME_PROFILE_ROOT}" "${CHROME_PROFILE_DIR}" "${CHROME_CONFIG_DIR}"
+
+# These locks refer to processes/sockets in the previous container instance.
+# Removing stale values is safe before Chrome is launched and prevents a
+# persisted profile from being mistaken for an already-running local instance.
+rm -f \
+  "${CHROME_PROFILE_DIR}/SingletonCookie" \
+  "${CHROME_PROFILE_DIR}/SingletonLock" \
+  "${CHROME_PROFILE_DIR}/SingletonSocket"
+
 # Nginx owns the Home Assistant Ingress port. Selkies stays private behind it.
 export SELKIES_PORT=8081
 export SELKIES_ENABLE_HTTPS=false
@@ -86,6 +117,7 @@ echo "[meeting-recorder] Selkies internal port: 8081."
 echo "[meeting-recorder] Meeting Recorder gateway/API ingress port: 8080."
 echo "[meeting-recorder] Recordings directory: ${MEDIA_DIR}."
 echo "[meeting-recorder] State directory: ${STATE_DIR}."
+echo "[meeting-recorder] Persistent Chrome profile: ${CHROME_PROFILE_DIR}."
 
 nginx -t
 nginx
@@ -94,6 +126,7 @@ nginx
 # the audio server; individual recording requests wait for audio readiness.
 export XDG_RUNTIME_DIR="${RUNTIME_DIR}"
 export PULSE_SERVER="unix:${RUNTIME_DIR}/pulse/native"
+export PYTHONPATH="/opt/meeting-recorder-python${PYTHONPATH:+:${PYTHONPATH}}"
 
 /usr/bin/sudo-root -E -H -u ubuntu -- /usr/local/bin/meeting-recorder-api &
 API_PID=$!

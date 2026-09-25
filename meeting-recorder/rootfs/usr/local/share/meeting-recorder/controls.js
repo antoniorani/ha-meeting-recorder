@@ -44,6 +44,8 @@
     #mr-finish { background: #f3f3f3; color: #111; }
     #mr-schedule { background: #ded6ff; color: #111; }
     #mr-cancel-schedule { background: #3b3b42; color: #fff; }
+    #mr-retry-transcription { background: #4b3d66; color: #fff; }
+    #mr-retry-transcription[hidden] { display: none; }
     #mr-end-time {
       background: #fff;
       color: #111;
@@ -71,6 +73,10 @@
     #mr-control.recording #mr-dot {
       background: #ff334f;
       box-shadow: 0 0 0 4px rgba(255, 51, 79, .18);
+    }
+    #mr-control.transcribing #mr-dot {
+      background: #b798ff;
+      box-shadow: 0 0 0 4px rgba(183, 152, 255, .18);
     }
     #mr-scheduled {
       color: #ddd;
@@ -116,6 +122,7 @@
     <input id="mr-end-time" type="datetime-local" step="60" aria-label="Fecha y hora de finalización">
     <button id="mr-schedule" type="button">Programar fin</button>
     <button id="mr-cancel-schedule" type="button" disabled>Cancelar fin</button>
+    <button id="mr-retry-transcription" type="button" hidden>Reintentar transcripción</button>
     <span id="mr-scheduled"></span>
     <span id="mr-msg" aria-live="polite"></span>
   `;
@@ -126,6 +133,7 @@
   const endTimeInput = root.querySelector("#mr-end-time");
   const scheduleButton = root.querySelector("#mr-schedule");
   const cancelScheduleButton = root.querySelector("#mr-cancel-schedule");
+  const retryTranscriptionButton = root.querySelector("#mr-retry-transcription");
   const scheduledLabel = root.querySelector("#mr-scheduled");
   const label = root.querySelector("#mr-label");
   const message = root.querySelector("#mr-msg");
@@ -171,13 +179,19 @@
     const recording = Boolean(status && status.recording);
     const browserRunning = Boolean(status && status.browser_running);
     const scheduled = status?.scheduled_end_at || null;
+    const transcription = status?.transcription || {};
+    const transcribing = transcription.state === "running";
+    const transcriptionError = transcription.state === "error";
 
     root.classList.toggle("recording", recording);
-    startButton.disabled = busy || recording || !status?.audio_ready;
+    root.classList.toggle("transcribing", transcribing && !recording);
+    startButton.disabled = busy || recording || transcribing || !status?.audio_ready;
     finishButton.disabled = busy || (!recording && !browserRunning);
     endTimeInput.disabled = busy || !recording;
     scheduleButton.disabled = busy || !recording || !endTimeInput.value;
     cancelScheduleButton.disabled = busy || !scheduled;
+    retryTranscriptionButton.hidden = !transcriptionError;
+    retryTranscriptionButton.disabled = busy || recording || transcribing;
 
     if (recording) {
       if (status.started_at) {
@@ -185,6 +199,11 @@
         startedAt = Number.isFinite(parsed) ? parsed : startedAt;
       }
       label.textContent = elapsedText();
+    } else if (transcribing) {
+      startedAt = null;
+      const done = transcription.segments_completed ?? 0;
+      const total = transcription.segments_total ?? "?";
+      label.textContent = `TRANSCRIBIENDO ${done}/${total}`;
     } else {
       startedAt = null;
       label.textContent = status?.audio_ready ? "LISTO" : "AUDIO…";
@@ -202,7 +221,17 @@
     }
 
     const warnings = Array.isArray(status?.warnings) ? status.warnings : [];
-    if (status?.last_error) {
+    if (transcribing) {
+      const current = transcription.current_segment || "";
+      message.textContent = current ? `Whisper: ${current}` : "Whisper preparando transcripción…";
+      message.title = message.textContent;
+    } else if (transcriptionError) {
+      message.textContent = `Whisper: ${transcription.error || "error de transcripción"}`;
+      message.title = transcription.error || "";
+    } else if (transcription.state === "completed") {
+      message.textContent = "Transcripción lista";
+      message.title = transcription.transcript_path || "";
+    } else if (status?.last_error) {
       message.textContent = status.last_error;
       message.title = status.last_error;
     } else if (warnings.includes("virtual_microphone_not_available_at_start")) {
@@ -299,6 +328,7 @@
   });
   scheduleButton.addEventListener("click", setSchedule);
   cancelScheduleButton.addEventListener("click", cancelSchedule);
+  retryTranscriptionButton.addEventListener("click", () => postAction("transcription/retry"));
 
   setInterval(() => {
     if (lastStatus?.recording) {
