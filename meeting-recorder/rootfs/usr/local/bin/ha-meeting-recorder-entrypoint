@@ -126,7 +126,6 @@ nginx
 # the audio server; individual recording requests wait for audio readiness.
 export XDG_RUNTIME_DIR="${RUNTIME_DIR}"
 export PULSE_SERVER="unix:${RUNTIME_DIR}/pulse/native"
-export PYTHONPATH="/opt/meeting-recorder-python${PYTHONPATH:+:${PYTHONPATH}}"
 
 /usr/bin/sudo-root -E -H -u ubuntu -- /usr/local/bin/meeting-recorder-api &
 API_PID=$!
