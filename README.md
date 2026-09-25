@@ -10,9 +10,11 @@ Experimental Home Assistant OS app for a persistent remote browser session that 
 
 ## Current status
 
-**Phase 0 technical spike.**
+**Phase 3 recording prototype.**
 
-This first milestone does **not** record or transcribe meetings yet. Its only purpose is to validate the highest-risk part of the architecture on the target HAOS host:
+The persistent-browser spike has passed on the target HAOS host. The current build adds on-demand, segmented **audio-only recording** while keeping meeting access manual and platform-independent. Automatic transcription is not wired yet.
+
+Validated foundation:
 
 1. Home Assistant can build and run a Selkies desktop container.
 2. The remote desktop opens through Home Assistant Ingress in the same Home Assistant tab.

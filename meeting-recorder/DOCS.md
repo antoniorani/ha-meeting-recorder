@@ -1,66 +1,120 @@
-# Meeting Recorder — Phase 0
+# Meeting Recorder — Phase 3 recording prototype
 
-This build is a technical compatibility spike, not the complete Meeting Recorder MVP.
+The persistent Selkies browser, Home Assistant Ingress, audio downlink, microphone forwarding and webcam forwarding have already been validated on the target HAOS host.
 
-## Open the remote desktop
+Version **0.3.0** adds the first real Meeting Recorder function: **on-demand audio recording**.
 
-Meeting Recorder now uses **Home Assistant Ingress**.
+## Normal flow
 
-Start the app and press **Open Web UI**. The remote desktop should open inside the Home Assistant interface, in the same browser tab and with the normal Home Assistant chrome, similar to ESPHome and other ingress-enabled apps.
+1. Start Meeting Recorder and open its Web UI.
+2. Use the persistent remote Chrome manually.
+3. Navigate to Jitsi, Meet, Teams, Webex or another compatible meeting site and join the meeting yourself.
+4. When you want the recording to begin, press **Iniciar grabación** in the floating Meeting Recorder control bar.
+5. You may navigate away from Home Assistant; Selkies, Chromium and FFmpeg continue running in the add-on.
+6. Return later and press **Detener grabación**.
+7. The add-on closes the current segment, assembles all segments and validates the final audio.
 
-Home Assistant handles HTTPS and authentication. Selkies only listens on plain HTTP port 8080 inside the private add-on network; port 8080 is not published to the host and Selkies does not present a second login screen.
+This version does **not** navigate to a meeting, fill Meeting IDs/PINs or use Playwright.
 
-## Phase 0 test
+## Where files are stored
 
-1. Start the app.
-2. Press **Open Web UI**.
-3. Confirm the Selkies desktop opens inside Home Assistant rather than in a separate direct-port tab.
-4. Launch Google Chrome from the remote desktop.
-5. Navigate to any harmless test page.
-6. Leave that browser window open.
-7. Navigate away from Meeting Recorder or close the Home Assistant browser tab completely.
-8. Wait at least one minute.
-9. Return to Meeting Recorder through Home Assistant.
-10. Confirm that the same remote desktop and same Chrome window are still present.
+Home Assistant maps its writable media directory into the app. Each recording creates:
 
-Then open a conferencing test page such as Jitsi in the **remote Chrome**. The remote browser should enumerate a Selkies virtual microphone and virtual webcam.
+```text
+/media/meeting-recorder/
+  YYYY-MM-DD_HHMMSS_<id>/
+    session.json
+    ffmpeg.log
+    segments/
+      segment_00000.ogg
+      segment_00001.ogg
+      ...
+    segments.txt
+    audio.opus
+```
 
-The capture policy is now `demand`: Selkies creates the virtual devices so conferencing applications can discover them, but it asks for the **real microphone/camera of the device running Home Assistant** only when the remote application actually opens those virtual devices.
+The default segment length is 300 seconds (5 minutes). It can be changed in the app configuration for testing.
 
-Important: browser permissions must be granted to the **outer Home Assistant page/app**, not only to Chrome inside the remote desktop. The inner Chrome permission controls whether Jitsi may use the virtual Selkies devices; the outer browser/app permission controls whether Selkies may capture your actual microphone/camera.
+## Audio topology
 
-## Why Ingress
+The recording graph is intentionally separate from normal playback:
 
-Home Assistant Ingress proxies HTTP and WebSocket traffic from the Home Assistant origin to the app. This gives us:
+```text
+remote meeting audio
+        |
+        v
+   output.monitor -----------+
+                              |
+                              v
+                       meeting_recorder_mix
+                              |
+client mic                    +--> meeting_recorder_mix.monitor --> FFmpeg --> Opus segments
+   |
+   v
+SelkiesVirtualMic ------------+
+```
 
-- the same-tab Home Assistant experience;
-- Home Assistant authentication instead of a second Selkies login;
-- HTTPS at the browser even though the internal Selkies hop is HTTP;
-- no directly published Selkies port.
+The null recording sink is not the desktop's default output. Therefore adding the microphone to the recording does not intentionally route your microphone back to your speakers.
 
-Selkies' WebSocket client derives its route prefix from the URL it is loaded from, so it is suitable for a path-based reverse proxy such as Home Assistant Ingress.
+If the virtual microphone is not present at the exact moment recording starts, recording begins with remote/desktop audio and the API keeps checking for the Selkies microphone so it can attach it when it appears.
 
-## Important limitations
+## Privacy note about mute
 
-- No meeting-platform automation yet.
-- No FFmpeg recording yet.
-- No audio segmentation yet.
-- No scheduled stop yet.
-- No Whisper/Wyoming integration yet.
-- No GPU acceleration is required for the first test.
-- Only `amd64` is declared.
-- The app currently uses `SYS_ADMIN` and `apparmor: false` solely for the shared-memory compatibility test.
-- Microphone and webcam through the Home Assistant ingress iframe still need to be verified on the actual desktop/mobile clients.
-- If a conferencing page shows the virtual devices but capture fails, check microphone/camera permissions for the browser or Home Assistant app that is displaying Meeting Recorder.
+This prototype records the **Selkies virtual microphone source**. A conferencing application can implement its mute button in software while keeping the microphone source open. In that situation, Meeting Recorder cannot generically know that Jitsi/Meet/Teams has muted its outbound WebRTC track.
 
-## Why /dev/shm is handled specially
+Therefore, for this prototype, the reliable privacy boundary is the microphone control at the Selkies/client layer. Do not assume an in-meeting software mute necessarily removes your microphone from the local recording.
 
-The upstream Selkies desktop documentation recommends a 2 GiB shared-memory allocation and warns that the usual Docker 64 MiB allocation can crash browsers.
+A platform-independent post-application mute signal is not yet implemented.
 
-Home Assistant's app configuration does not expose Docker's `--shm-size` option directly. The Phase 0 entrypoint therefore remounts `/dev/shm` using the configurable `shm_size_mb` option (2048 MiB by default).
+## Ingress architecture
 
-This implementation is intentionally isolated so we can replace it after testing if a safer HAOS-specific solution is available.
+Home Assistant still sees a single Ingress endpoint on port 8080:
 
-## What success unlocks
+```text
+Home Assistant Ingress
+        |
+        v
+Nginx :8080
+  |             |
+  |             +--> /meeting-recorder/api/* --> control API :8099
+  |
+  +--> everything else --> Selkies :8081
+```
 
-Once this test passes on the target HAOS machine, the next development step is to add controlled browser startup and meeting-platform navigation, followed by the virtual audio graph and segmented FFmpeg recording.
+Nginx injects only the Meeting Recorder controls into Selkies' HTML. Streaming and WebSocket traffic continue to be proxied transparently to Selkies.
+
+## Configuration
+
+```yaml
+shm_size_mb: 2048
+segment_seconds: 300
+audio_bitrate_kbps: 64
+```
+
+## Test for 0.3.0
+
+Use a short Jitsi call first:
+
+1. Join the test meeting manually.
+2. Make sure you can hear the other side and that your mic works.
+3. Start recording.
+4. Play/receive some remote audio.
+5. Speak several clear phrases through the forwarded mic.
+6. Leave the recording running for at least 20-30 seconds.
+7. Stop recording.
+8. Check that the control says the audio was saved.
+9. Inspect the app log for the final `audio.opus` path.
+10. Play that file from the Home Assistant media storage and verify that it contains both the remote audio and your voice.
+
+If recording fails, capture the add-on log and, when available, the session's `ffmpeg.log`.
+
+## Not implemented yet
+
+- “Finalizar reunión y grabación” as one atomic action.
+- Scheduled end time.
+- Automatic Whisper/Wyoming transcription.
+- Recovery/assembly after a hard host crash beyond preserving already closed segments.
+- Recording history UI.
+- Platform-aware mute semantics.
+- GPU acceleration work.
+- Removal of the temporary `SYS_ADMIN` / AppArmor compromise used to resize `/dev/shm`.

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.0
+
+- Add an internal Nginx gateway in front of Selkies while keeping Home Assistant Ingress on port 8080.
+- Move Selkies itself to private port 8081.
+- Add a dependency-free local control API on port 8099, reachable only through the Ingress gateway.
+- Inject a small recording control panel into the Selkies page without adding another browser/iframe layer.
+- Add explicit **Start recording** and **Stop recording** actions.
+- Build a dedicated PulseAudio/PipeWire recording mix from the desktop output monitor plus `SelkiesVirtualMic`.
+- Keep that recording mix separate from the normal playback sink to avoid microphone feedback.
+- Record audio only with FFmpeg/Opus in independently closed segments (5 minutes by default).
+- Assemble the segments into `audio.opus` when recording stops and validate its duration with ffprobe.
+- Store recordings under `/media/meeting-recorder` and persist per-session metadata.
+- Add audio diagnostics and runtime warnings when the virtual microphone is not yet available.
+- Add configurable segment duration and Opus bitrate.
+
+
 ## 0.2.1
 
 - Change microphone and webcam policy from `false` to Selkies `demand` mode.
