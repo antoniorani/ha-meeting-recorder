@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.0
+
+- Persist the Google Chrome profile under `/data/chrome-profile/google-chrome` so browser preferences, cookies, site permissions, extensions and session state survive add-on restarts and future image updates.
+- Remove stale Chrome singleton locks on container startup before Chrome is launched.
+- Add configurable post-meeting transcription through the existing Home Assistant Whisper/Wyoming service.
+- Default Wyoming target to `core-whisper:10300`, while keeping host/port configurable.
+- Pin the Wyoming Python client library to version `1.10.2`.
+- Transcribe independently closed audio segments sequentially instead of submitting an entire long meeting as one unbounded request.
+- Generate `transcript.txt`, `transcript.json`, `transcription.json` and `transcription.log` beside each recording.
+- Show transcription progress/errors in the Meeting Recorder overlay.
+- Add a **Reintentar transcripción** action when Whisper fails.
+- Prevent a new recording from starting while a post-meeting transcription is actively consuming CPU.
+
+
 ## 0.4.0
 
 - Replace the primary stop control with **Finalizar reunión y grabación**.
