@@ -327,7 +327,15 @@ class Recorder:
 
     def _transcription_running(self) -> bool:
         proc = self.transcriber
-        return proc is not None and proc.poll() is None
+        if proc is None:
+            return False
+        if proc.poll() is None:
+            return True
+        if self.transcription_log is not None:
+            self.transcription_log.close()
+            self.transcription_log = None
+        self.transcriber = None
+        return False
 
     def _transcription_status(self) -> dict[str, Any]:
         session_dir = self.transcription_session_dir or self.session_dir
