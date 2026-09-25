@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+
+- Change microphone and webcam policy from `false` to Selkies `demand` mode.
+- Pre-create virtual capture devices so Jitsi/Meet/Teams can enumerate them instead of showing `None`.
+- Request the real client microphone/camera only while a remote application is actively reading the virtual device.
+- Document the distinction between permissions in the outer Home Assistant client and permissions in the inner remote Chrome.
+
+
 ## 0.2.0
 
 - Switch the remote desktop UI to Home Assistant Ingress.
