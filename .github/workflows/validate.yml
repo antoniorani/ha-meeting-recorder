@@ -65,3 +65,15 @@ jobs:
 
           print("Home Assistant app config: basic checks OK")
           PY
+
+      - name: Check capture policy
+        run: |
+          grep -q '^export SELKIES_MICROPHONE_ON_START=demand
+          PY
+ meeting-recorder/rootfs/usr/local/bin/ha-meeting-recorder-entrypoint
+          grep -q '^export SELKIES_WEBCAM_ON_START=demand
+          PY
+ meeting-recorder/rootfs/usr/local/bin/ha-meeting-recorder-entrypoint
+          echo "Selkies capture demand policy: OK"
+          exit 0
+          # The trailing here-doc marker below is intentionally not used.
