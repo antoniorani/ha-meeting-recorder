@@ -1,0 +1,557 @@
+#!/usr/bin/env python3
+"""Meeting Recorder control API and audio recorder.
+
+This service intentionally has no third-party Python dependencies. Nginx keeps it
+private behind Home Assistant Ingress. Selkies owns the desktop; this process
+only controls the recording audio graph and FFmpeg.
+"""
+from __future__ import annotations
+
+import json
+import os
+import signal
+import subprocess
+import threading
+import time
+import uuid
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any, Optional
+
+HOST = "127.0.0.1"
+PORT = 8099
+OPTIONS = Path("/data/options.json")
+MEDIA_ROOT = Path("/media/meeting-recorder")
+STATE_FILE = Path("/data/meeting-recorder-state.json")
+MIX_SINK = "meeting_recorder_mix"
+MIX_MONITOR = f"{MIX_SINK}.monitor"
+MIC_NAMES = ("SelkiesVirtualMic", "output.SelkiesVirtualMic")
+
+
+def log(message: str) -> None:
+    print(f"[meeting-recorder-api] {message}", flush=True)
+
+
+def iso_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def read_options() -> dict[str, Any]:
+    try:
+        data = json.loads(OPTIONS.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def run(
+    args: list[str],
+    *,
+    check: bool = True,
+    timeout: float = 10,
+    capture: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        args,
+        check=check,
+        timeout=timeout,
+        text=True,
+        stdout=subprocess.PIPE if capture else None,
+        stderr=subprocess.PIPE if capture else None,
+    )
+
+
+def pactl(*args: str, check: bool = True) -> str:
+    result = run(["pactl", *args], check=check)
+    return (result.stdout or "").strip()
+
+
+def list_short(kind: str) -> list[dict[str, str]]:
+    text = pactl("list", "short", kind)
+    rows: list[dict[str, str]] = []
+    for line in text.splitlines():
+        cols = line.split("\t")
+        if len(cols) >= 2:
+            rows.append({"index": cols[0], "name": cols[1], "raw": line})
+    return rows
+
+
+def audio_ready() -> bool:
+    try:
+        pactl("info")
+        return True
+    except Exception:
+        return False
+
+
+def wait_for_audio(timeout: float = 20.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if audio_ready():
+            return
+        time.sleep(0.5)
+    raise RuntimeError("PipeWire/Pulse audio server did not become ready")
+
+
+def find_output_monitor() -> str:
+    sources = {row["name"] for row in list_short("sources")}
+    if "output.monitor" in sources:
+        return "output.monitor"
+
+    try:
+        default_sink = pactl("get-default-sink")
+    except Exception:
+        default_sink = ""
+    if default_sink and f"{default_sink}.monitor" in sources:
+        return f"{default_sink}.monitor"
+
+    candidates = [
+        name
+        for name in sources
+        if name.endswith(".monitor")
+        and name not in {"input.monitor", MIX_MONITOR}
+        and "meeting_recorder" not in name
+    ]
+    if candidates:
+        return sorted(candidates)[0]
+    raise RuntimeError("Could not find the desktop output monitor source")
+
+
+def find_microphone() -> Optional[str]:
+    sources = {row["name"] for row in list_short("sources")}
+    for name in MIC_NAMES:
+        if name in sources:
+            return name
+    return None
+
+
+def load_module(name: str, *arguments: str) -> int:
+    out = pactl("load-module", name, *arguments)
+    try:
+        return int(out.strip())
+    except ValueError as exc:
+        raise RuntimeError(f"Unexpected pactl module id: {out!r}") from exc
+
+
+def unload_module(module_id: int) -> None:
+    try:
+        pactl("unload-module", str(module_id), check=False)
+    except Exception:
+        pass
+
+
+def cleanup_stale_graph() -> None:
+    try:
+        text = pactl("list", "short", "modules")
+    except Exception:
+        return
+    stale: list[int] = []
+    for line in text.splitlines():
+        cols = line.split("\t")
+        if len(cols) < 3:
+            continue
+        try:
+            module_id = int(cols[0])
+        except ValueError:
+            continue
+        args = cols[2]
+        if MIX_SINK in args:
+            stale.append(module_id)
+    for module_id in reversed(stale):
+        unload_module(module_id)
+
+
+class Recorder:
+    def __init__(self) -> None:
+        self.lock = threading.RLock()
+        self.ffmpeg: Optional[subprocess.Popen[str]] = None
+        self.ffmpeg_log = None
+        self.modules: list[int] = []
+        self.mic_loop_module: Optional[int] = None
+        self.session_id: Optional[str] = None
+        self.session_dir: Optional[Path] = None
+        self.started_at: Optional[str] = None
+        self.started_monotonic: Optional[float] = None
+        self.last_completed: Optional[dict[str, Any]] = None
+        self.last_error: Optional[str] = None
+        self.warnings: list[str] = []
+        self.watcher_stop = threading.Event()
+        self.watcher: Optional[threading.Thread] = None
+        self._restore_state()
+
+    def _restore_state(self) -> None:
+        try:
+            old = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        if old.get("state") == "recording":
+            old["state"] = "interrupted"
+            old["interrupted_at"] = iso_now()
+            self.last_completed = old
+            self._write_json(STATE_FILE, old)
+
+    @staticmethod
+    def _write_json(path: Path, data: dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(path)
+
+    def _metadata(self, state: str) -> dict[str, Any]:
+        elapsed = 0
+        if self.started_monotonic is not None:
+            elapsed = max(0, int(time.monotonic() - self.started_monotonic))
+        return {
+            "state": state,
+            "session_id": self.session_id,
+            "started_at": self.started_at,
+            "elapsed_seconds": elapsed,
+            "directory": str(self.session_dir) if self.session_dir else None,
+            "audio_path": str(self.session_dir / "audio.opus") if self.session_dir else None,
+            "warnings": list(self.warnings),
+            "last_error": self.last_error,
+            "updated_at": iso_now(),
+        }
+
+    def status(self) -> dict[str, Any]:
+        with self.lock:
+            running = self.ffmpeg is not None and self.ffmpeg.poll() is None
+            data = self._metadata("recording" if running else "ready")
+            data["recording"] = running
+            data["audio_ready"] = audio_ready()
+            if self.last_completed is not None:
+                data["last_completed"] = self.last_completed
+            return data
+
+    def diagnostics(self) -> dict[str, Any]:
+        try:
+            sources = list_short("sources")
+            sinks = list_short("sinks")
+            default_sink = pactl("get-default-sink", check=False)
+            default_source = pactl("get-default-source", check=False)
+            return {
+                "ok": True,
+                "sources": [r["name"] for r in sources],
+                "sinks": [r["name"] for r in sinks],
+                "default_sink": default_sink,
+                "default_source": default_source,
+                "output_monitor": self._safe(find_output_monitor),
+                "virtual_microphone": find_microphone(),
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @staticmethod
+    def _safe(fn):
+        try:
+            return fn()
+        except Exception:
+            return None
+
+    def _attach_mic_if_available(self) -> bool:
+        if self.mic_loop_module is not None:
+            return True
+        mic = find_microphone()
+        if mic is None:
+            return False
+        module_id = load_module(
+            "module-loopback",
+            f"source={mic}",
+            f"sink={MIX_SINK}",
+            "latency_msec=50",
+        )
+        self.modules.append(module_id)
+        self.mic_loop_module = module_id
+        log(f"Microphone source '{mic}' attached to recording mix.")
+        self.warnings = [w for w in self.warnings if w != "virtual_microphone_not_available_at_start"]
+        return True
+
+    def _watch_microphone(self) -> None:
+        while not self.watcher_stop.wait(1.0):
+            with self.lock:
+                if self.ffmpeg is None or self.ffmpeg.poll() is not None:
+                    return
+                if self.mic_loop_module is not None:
+                    continue
+                try:
+                    self._attach_mic_if_available()
+                except Exception as exc:
+                    log(f"Microphone attach retry failed: {exc}")
+
+    def start(self) -> dict[str, Any]:
+        with self.lock:
+            if self.ffmpeg is not None and self.ffmpeg.poll() is None:
+                return self.status()
+
+            self.last_error = None
+            self.warnings = []
+            wait_for_audio()
+            cleanup_stale_graph()
+
+            output_monitor = find_output_monitor()
+            options = read_options()
+            segment_seconds = int(options.get("segment_seconds", 300))
+            bitrate_kbps = int(options.get("audio_bitrate_kbps", 64))
+
+            stamp = datetime.now().astimezone().strftime("%Y-%m-%d_%H%M%S")
+            self.session_id = uuid.uuid4().hex[:8]
+            self.session_dir = MEDIA_ROOT / f"{stamp}_{self.session_id}"
+            segments = self.session_dir / "segments"
+            segments.mkdir(parents=True, exist_ok=False)
+
+            try:
+                null_id = load_module(
+                    "module-null-sink",
+                    f"sink_name={MIX_SINK}",
+                    "sink_properties=device.description=MeetingRecorderMix",
+                    "rate=48000",
+                    "channels=2",
+                )
+                self.modules = [null_id]
+
+                # Give PipeWire-Pulse a moment to expose the monitor.
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    if MIX_MONITOR in {r["name"] for r in list_short("sources")}:
+                        break
+                    time.sleep(0.1)
+                else:
+                    raise RuntimeError("Recording mix monitor did not appear")
+
+                desktop_id = load_module(
+                    "module-loopback",
+                    f"source={output_monitor}",
+                    f"sink={MIX_SINK}",
+                    "latency_msec=50",
+                )
+                self.modules.append(desktop_id)
+
+                if not self._attach_mic_if_available():
+                    self.warnings.append("virtual_microphone_not_available_at_start")
+                    log("Virtual microphone is not available yet; recording starts with desktop audio and will attach it when it appears.")
+
+                ffmpeg_log_path = self.session_dir / "ffmpeg.log"
+                self.ffmpeg_log = ffmpeg_log_path.open("a", encoding="utf-8")
+                pattern = str(segments / "segment_%05d.ogg")
+                cmd = [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-nostdin",
+                    "-loglevel", "warning",
+                    "-f", "pulse",
+                    "-i", MIX_MONITOR,
+                    "-ac", "2",
+                    "-ar", "48000",
+                    "-c:a", "libopus",
+                    "-b:a", f"{bitrate_kbps}k",
+                    "-vbr", "on",
+                    "-application", "audio",
+                    "-f", "segment",
+                    "-segment_time", str(segment_seconds),
+                    "-reset_timestamps", "1",
+                    "-segment_format", "ogg",
+                    pattern,
+                ]
+                self.ffmpeg = subprocess.Popen(
+                    cmd,
+                    stdout=self.ffmpeg_log,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    start_new_session=True,
+                )
+
+                time.sleep(0.4)
+                if self.ffmpeg.poll() is not None:
+                    raise RuntimeError(
+                        f"FFmpeg exited during startup with code {self.ffmpeg.returncode}; see {ffmpeg_log_path}"
+                    )
+
+                self.started_at = iso_now()
+                self.started_monotonic = time.monotonic()
+                metadata = self._metadata("recording")
+                metadata.update(
+                    {
+                        "output_monitor": output_monitor,
+                        "mix_monitor": MIX_MONITOR,
+                        "segment_seconds": segment_seconds,
+                        "audio_bitrate_kbps": bitrate_kbps,
+                    }
+                )
+                self._write_json(self.session_dir / "session.json", metadata)
+                self._write_json(STATE_FILE, metadata)
+
+                self.watcher_stop.clear()
+                self.watcher = threading.Thread(
+                    target=self._watch_microphone,
+                    name="meeting-recorder-mic-watch",
+                    daemon=True,
+                )
+                self.watcher.start()
+                log(f"Recording started: {self.session_dir}")
+                return self.status()
+            except Exception:
+                self._stop_ffmpeg(force=True)
+                self._teardown_graph()
+                raise
+
+    def _stop_ffmpeg(self, force: bool = False) -> None:
+        proc = self.ffmpeg
+        if proc is None:
+            return
+        if proc.poll() is None:
+            try:
+                os.killpg(proc.pid, signal.SIGINT if not force else signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                proc.wait(timeout=15 if not force else 5)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                proc.wait(timeout=5)
+        self.ffmpeg = None
+        if self.ffmpeg_log is not None:
+            self.ffmpeg_log.close()
+            self.ffmpeg_log = None
+
+    def _teardown_graph(self) -> None:
+        for module_id in reversed(self.modules):
+            unload_module(module_id)
+        self.modules = []
+        self.mic_loop_module = None
+
+    def _finalize(self) -> dict[str, Any]:
+        assert self.session_dir is not None
+        segments = sorted((self.session_dir / "segments").glob("segment_*.ogg"))
+        if not segments:
+            raise RuntimeError("FFmpeg produced no audio segments")
+
+        concat = self.session_dir / "segments.txt"
+        concat.write_text(
+            "".join(f"file '{p.as_posix()}'\n" for p in segments),
+            encoding="utf-8",
+        )
+        output = self.session_dir / "audio.opus"
+        result = run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-nostdin",
+                "-loglevel", "warning",
+                "-y",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", str(concat),
+                "-c", "copy",
+                str(output),
+            ],
+            check=False,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Final audio assembly failed: {(result.stderr or '').strip()}")
+
+        probe = run(
+            [
+                "ffprobe",
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "json",
+                str(output),
+            ],
+            timeout=20,
+        )
+        probe_json = json.loads(probe.stdout or "{}")
+        duration = float(probe_json.get("format", {}).get("duration", 0) or 0)
+        if duration <= 0:
+            raise RuntimeError("Final audio file has no measurable duration")
+
+        completed = self._metadata("completed")
+        completed.update(
+            {
+                "completed_at": iso_now(),
+                "audio_path": str(output),
+                "segments": len(segments),
+                "duration_seconds": round(duration, 3),
+            }
+        )
+        self._write_json(self.session_dir / "session.json", completed)
+        self._write_json(STATE_FILE, completed)
+        return completed
+
+    def stop(self) -> dict[str, Any]:
+        with self.lock:
+            if self.ffmpeg is None or self.ffmpeg.poll() is not None:
+                return self.status()
+            self.watcher_stop.set()
+            self._stop_ffmpeg()
+            self._teardown_graph()
+            try:
+                completed = self._finalize()
+                self.last_completed = completed
+                log(f"Recording finalized: {completed.get('audio_path')}")
+            except Exception as exc:
+                self.last_error = str(exc)
+                failed = self._metadata("error")
+                self._write_json(STATE_FILE, failed)
+                if self.session_dir:
+                    self._write_json(self.session_dir / "session.json", failed)
+                raise
+            finally:
+                self.started_monotonic = None
+            return self.status()
+
+
+RECORDER = Recorder()
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "MeetingRecorder/0.3"
+
+    def log_message(self, fmt: str, *args: Any) -> None:
+        log(fmt % args)
+
+    def _json(self, status: int, data: dict[str, Any]) -> None:
+        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self) -> None:
+        if self.path == "/status":
+            self._json(200, RECORDER.status())
+        elif self.path == "/health":
+            self._json(200, {"ok": True, "audio_ready": audio_ready(), "time": iso_now()})
+        elif self.path == "/audio":
+            self._json(200, RECORDER.diagnostics())
+        else:
+            self._json(404, {"error": "not_found"})
+
+    def do_POST(self) -> None:
+        try:
+            if self.path == "/recording/start":
+                self._json(200, RECORDER.start())
+            elif self.path == "/recording/stop":
+                self._json(200, RECORDER.stop())
+            else:
+                self._json(404, {"error": "not_found"})
+        except Exception as exc:
+            log(f"API error on {self.path}: {exc}")
+            RECORDER.last_error = str(exc)
+            self._json(500, {"error": str(exc), "status": RECORDER.status()})
+
+
+def main() -> None:
+    MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
+    log(f"Control API listening on {HOST}:{PORT}.")
+    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
+
+
+if __name__ == "__main__":
+    main()
