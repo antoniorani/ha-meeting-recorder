@@ -1,0 +1,294 @@
+#!/usr/bin/env python3
+"""Transcribe one completed Meeting Recorder session through Wyoming Whisper."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from wyoming.asr import Transcript, TranscriptChunk, Transcribe
+from wyoming.audio import AudioChunk, AudioStart, AudioStop
+from wyoming.client import AsyncTcpClient
+from wyoming.error import Error
+
+OPTIONS = Path("/data/options.json")
+PCM_RATE = 16000
+PCM_WIDTH = 2
+PCM_CHANNELS = 1
+PCM_CHUNK_BYTES = 32000  # ~1 second of 16 kHz mono s16le
+
+
+def iso_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def read_options() -> dict[str, Any]:
+    try:
+        value = json.loads(OPTIONS.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+
+def write_json(path: Path, data: dict[str, Any]) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)
+
+
+async def transcribe_audio(
+    source: Path,
+    *,
+    host: str,
+    port: int,
+    language: str | None,
+    connect_timeout: float,
+    read_timeout: float,
+) -> tuple[str, str | None]:
+    """Stream decoded PCM to one Wyoming ASR request."""
+
+    async with AsyncTcpClient(
+        host,
+        port,
+        connect_timeout=connect_timeout,
+        read_timeout=read_timeout,
+    ) as client:
+        await client.write_event(Transcribe(language=language).event())
+        await client.write_event(
+            AudioStart(
+                rate=PCM_RATE,
+                width=PCM_WIDTH,
+                channels=PCM_CHANNELS,
+            ).event()
+        )
+
+        ffmpeg = await asyncio.create_subprocess_exec(
+            "ffmpeg",
+            "-hide_banner",
+            "-nostdin",
+            "-loglevel",
+            "error",
+            "-i",
+            str(source),
+            "-vn",
+            "-ac",
+            str(PCM_CHANNELS),
+            "-ar",
+            str(PCM_RATE),
+            "-f",
+            "s16le",
+            "-acodec",
+            "pcm_s16le",
+            "pipe:1",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        assert ffmpeg.stdout is not None
+        assert ffmpeg.stderr is not None
+
+        while True:
+            chunk = await ffmpeg.stdout.read(PCM_CHUNK_BYTES)
+            if not chunk:
+                break
+            await client.write_event(
+                AudioChunk(
+                    rate=PCM_RATE,
+                    width=PCM_WIDTH,
+                    channels=PCM_CHANNELS,
+                    audio=chunk,
+                ).event()
+            )
+
+        stderr = (await ffmpeg.stderr.read()).decode("utf-8", errors="replace").strip()
+        return_code = await ffmpeg.wait()
+        if return_code != 0:
+            raise RuntimeError(
+                f"ffmpeg PCM conversion failed for {source.name}: {stderr or return_code}"
+            )
+
+        await client.write_event(AudioStop().event())
+
+        streamed_chunks: list[str] = []
+        response_language: str | None = None
+        while True:
+            event = await client.read_event()
+            if event is None:
+                raise RuntimeError("Whisper closed the Wyoming connection without a transcript")
+
+            if Error.is_type(event.type):
+                error = Error.from_event(event)
+                raise RuntimeError(
+                    f"Whisper error{f' ({error.code})' if error.code else ''}: {error.text}"
+                )
+
+            if TranscriptChunk.is_type(event.type):
+                streamed_chunks.append(TranscriptChunk.from_event(event).text)
+                continue
+
+            if Transcript.is_type(event.type):
+                transcript = Transcript.from_event(event)
+                response_language = transcript.language
+                text = transcript.text.strip()
+                if text:
+                    return text, response_language
+                return "".join(streamed_chunks).strip(), response_language
+
+
+async def run_session(session_dir: Path) -> None:
+    options = read_options()
+    status_path = session_dir / "transcription.json"
+    transcript_path = session_dir / "transcript.txt"
+    transcript_json_path = session_dir / "transcript.json"
+
+    host = str(options.get("whisper_host", "core-whisper")).strip() or "core-whisper"
+    port = int(options.get("whisper_port", 10300))
+    language_value = str(options.get("whisper_language", "auto")).strip()
+    language = None if language_value.lower() in {"", "auto", "default"} else language_value
+    connect_timeout = float(options.get("whisper_connect_timeout_seconds", 10))
+    read_timeout = float(options.get("whisper_read_timeout_seconds", 1800))
+
+    segments = sorted((session_dir / "segments").glob("segment_*.ogg"))
+    if not segments:
+        final_audio = session_dir / "audio.opus"
+        if final_audio.exists():
+            segments = [final_audio]
+        else:
+            raise RuntimeError("No audio segments or final audio.opus are available")
+
+    status: dict[str, Any] = {
+        "state": "running",
+        "enabled": True,
+        "started_at": iso_now(),
+        "updated_at": iso_now(),
+        "host": host,
+        "port": port,
+        "language_requested": language_value,
+        "segments_total": len(segments),
+        "segments_completed": 0,
+        "current_segment": None,
+        "transcript_path": str(transcript_path),
+    }
+    write_json(status_path, status)
+
+    results: list[dict[str, Any]] = []
+    text_parts: list[str] = []
+    languages: list[str] = []
+
+    for index, source in enumerate(segments, start=1):
+        status["current_segment"] = source.name
+        status["segments_completed"] = index - 1
+        status["updated_at"] = iso_now()
+        write_json(status_path, status)
+
+        print(
+            f"[meeting-recorder-transcribe] {index}/{len(segments)} "
+            f"sending {source.name} to {host}:{port}",
+            flush=True,
+        )
+        text, detected_language = await transcribe_audio(
+            source,
+            host=host,
+            port=port,
+            language=language,
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+        )
+        results.append(
+            {
+                "index": index,
+                "source": source.name,
+                "text": text,
+                "language": detected_language,
+            }
+        )
+        if text:
+            text_parts.append(text)
+        if detected_language:
+            languages.append(detected_language)
+
+        status["segments_completed"] = index
+        status["updated_at"] = iso_now()
+        write_json(status_path, status)
+
+    transcript = "\n\n".join(text_parts).strip()
+    transcript_path.write_text(
+        transcript + ("\n" if transcript else ""),
+        encoding="utf-8",
+    )
+    write_json(
+        transcript_json_path,
+        {
+            "created_at": iso_now(),
+            "language_requested": language_value,
+            "languages_detected": sorted(set(languages)),
+            "segments": results,
+            "text": transcript,
+        },
+    )
+
+    status.update(
+        {
+            "state": "completed",
+            "finished_at": iso_now(),
+            "updated_at": iso_now(),
+            "current_segment": None,
+            "segments_completed": len(segments),
+            "transcript_path": str(transcript_path),
+            "transcript_json_path": str(transcript_json_path),
+            "characters": len(transcript),
+            "languages_detected": sorted(set(languages)),
+            "error": None,
+        }
+    )
+    write_json(status_path, status)
+    print(
+        f"[meeting-recorder-transcribe] completed: {transcript_path}",
+        flush=True,
+    )
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print(
+            "usage: meeting-recorder-transcribe /media/meeting-recorder/<session>",
+            file=sys.stderr,
+        )
+        return 64
+
+    session_dir = Path(sys.argv[1]).resolve()
+    status_path = session_dir / "transcription.json"
+    try:
+        if not session_dir.is_dir():
+            raise RuntimeError(f"Session directory does not exist: {session_dir}")
+        asyncio.run(run_session(session_dir))
+        return 0
+    except Exception as exc:
+        error_status: dict[str, Any]
+        try:
+            existing = json.loads(status_path.read_text(encoding="utf-8"))
+            error_status = existing if isinstance(existing, dict) else {}
+        except Exception:
+            error_status = {}
+        error_status.update(
+            {
+                "state": "error",
+                "enabled": True,
+                "error": str(exc),
+                "finished_at": iso_now(),
+                "updated_at": iso_now(),
+            }
+        )
+        try:
+            write_json(status_path, error_status)
+        except Exception:
+            pass
+        print(f"[meeting-recorder-transcribe] ERROR: {exc}", file=sys.stderr, flush=True)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
