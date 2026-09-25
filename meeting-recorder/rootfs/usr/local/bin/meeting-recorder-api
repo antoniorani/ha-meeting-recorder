@@ -348,9 +348,16 @@ class Recorder:
                 pass
 
         options = read_options()
+        enabled = bool(options.get("whisper_enabled", True))
+        if self._transcription_running():
+            return {
+                "state": "running",
+                "enabled": enabled,
+                "updated_at": iso_now(),
+            }
         return {
-            "state": "disabled" if not bool(options.get("whisper_enabled", True)) else "idle",
-            "enabled": bool(options.get("whisper_enabled", True)),
+            "state": "disabled" if not enabled else "idle",
+            "enabled": enabled,
         }
 
     def _start_transcription(self, session_dir: Path, *, retry: bool = False) -> None:
