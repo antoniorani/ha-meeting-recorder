@@ -36,6 +36,7 @@ jobs:
         run: |
           bash -n meeting-recorder/rootfs/usr/local/bin/ha-meeting-recorder-entrypoint
           python -m py_compile meeting-recorder/rootfs/usr/local/bin/meeting-recorder-api
+          python -m py_compile meeting-recorder/rootfs/usr/local/bin/meeting-recorder-transcribe
 
       - name: Validate injected JavaScript
         run: node --check meeting-recorder/rootfs/usr/local/share/meeting-recorder/controls.js
@@ -69,7 +70,17 @@ jobs:
           if not media_maps or media_maps[0].get("read_only", True):
               raise SystemExit("Home Assistant media must be mapped read-write")
 
-          for key in ("shm_size_mb", "segment_seconds", "audio_bitrate_kbps"):
+          for key in (
+              "shm_size_mb",
+              "segment_seconds",
+              "audio_bitrate_kbps",
+              "whisper_enabled",
+              "whisper_host",
+              "whisper_port",
+              "whisper_language",
+              "whisper_connect_timeout_seconds",
+              "whisper_read_timeout_seconds",
+          ):
               if key not in config.get("options", {}) or key not in config.get("schema", {}):
                   raise SystemExit(f"Missing recording option/schema: {key}")
 
@@ -125,5 +136,30 @@ jobs:
               if required not in controls:
                   raise SystemExit(f"Missing UI finalization control: {required}")
 
-          print("Selkies capture, gateway, state-directory and finalization policy: OK")
+          for required in (
+              'CHROME_PROFILE_ROOT="/data/chrome-profile"',
+              'CHROME_PROFILE_DIR="${CHROME_PROFILE_ROOT}/google-chrome"',
+              'ln -s "${CHROME_PROFILE_DIR}" "${CHROME_CONFIG_PATH}"',
+          ):
+              if required not in entry:
+                  raise SystemExit(f"Missing persistent Chrome profile setup: {required}")
+
+          dockerfile = Path("meeting-recorder/Dockerfile").read_text(encoding="utf-8")
+          if '"wyoming==1.10.2"' not in dockerfile:
+              raise SystemExit("Wyoming client must be pinned to 1.10.2")
+
+          transcriber = Path("meeting-recorder/rootfs/usr/local/bin/meeting-recorder-transcribe").read_text(encoding="utf-8")
+          for required in ("AsyncTcpClient", "Transcribe", "AudioStart", "AudioChunk", "AudioStop", "transcript.txt"):
+              if required not in transcriber:
+                  raise SystemExit(f"Missing Wyoming transcription implementation: {required}")
+
+          for required in ('def retry_transcription(', '"/transcription/retry"', "_start_transcription"):
+              if required not in api:
+                  raise SystemExit(f"Missing transcription control API: {required}")
+
+          for required in ("TRANSCRIBIENDO", "Reintentar transcripción", "transcription/retry"):
+              if required not in controls:
+                  raise SystemExit(f"Missing transcription UI: {required}")
+
+          print("Selkies, Chrome persistence, recording, finalization and Whisper policy: OK")
           PY
