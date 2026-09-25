@@ -1,60 +1,41 @@
-# Meeting Recorder — Phase 5 persistent Chrome + Whisper
+# Meeting Recorder — recording-only architecture
+
+Meeting Recorder has one responsibility: keep a persistent browser session for a manually joined web meeting and produce a durable, finalized **audio-only** recording.
 
 The target HAOS host has already validated:
 
 - persistent Selkies/Chrome sessions while the client UI is disconnected;
 - Home Assistant Ingress;
 - remote audio, microphone and webcam;
-- audio-only recording with remote audio + forwarded microphone;
-- manual and scheduled meeting finalization.
+- audio-only recording containing remote audio + forwarded microphone;
+- manual and scheduled meeting finalization;
+- persistent Google Chrome configuration across add-on restarts/updates.
 
-Version **0.5.0** adds two important pieces: a persistent Google Chrome profile and automatic post-meeting Whisper transcription.
+Version **0.6.0** deliberately removes transcription from this add-on.
 
 ## Normal flow
 
 1. Start Meeting Recorder and open its Web UI.
-2. Open Google Chrome and manually navigate to any compatible meeting platform.
-3. Join the meeting yourself.
-4. Press **Iniciar grabación**.
-5. Optionally set a scheduled end.
-6. Close Home Assistant if you want; the server-side session and recording continue.
-7. Finish manually with **Finalizar reunión y grabación**, or let the scheduled end fire.
-8. Chrome is closed and the audio is finalized.
-9. Only after recording has ended, Meeting Recorder starts Whisper/Wyoming transcription.
-10. When Whisper finishes, `transcript.txt` appears next to `audio.opus`.
+2. Use the persistent remote Google Chrome manually.
+3. Navigate to Jitsi, Meet, Teams, Webex or another compatible web meeting and join it yourself.
+4. Press **Iniciar grabación** when you want audio capture to start.
+5. Optionally configure a scheduled end time.
+6. You can close Home Assistant; Chrome and the recording continue in the server.
+7. End manually with **Finalizar reunión y grabación**, or let the scheduled end time fire.
+8. Meeting Recorder closes the Chrome meeting participant, closes the active audio segment and assembles the final recording.
+9. Only after ffprobe validates the assembled audio is it published as `audio.opus`.
 
-No Playwright, auto-join, platform-specific selectors, Meeting ID storage or PIN storage are used.
+Meeting Recorder does not navigate to meetings, fill IDs/PINs or use Playwright.
 
-## Persistent Google Chrome profile
+## Completion contract
 
-Google Chrome stores its Linux user profile under:
+There is intentionally no per-session metadata JSON contract.
 
-```text
-/home/ubuntu/.config/google-chrome
-```
-
-Meeting Recorder now redirects that path to persistent add-on storage:
-
-```text
-/data/chrome-profile/google-chrome
-```
-
-This means changes made inside Chrome are preserved across normal add-on restarts and **future Meeting Recorder updates**, including preferences, cookies, site permissions, installed extensions and browser session/profile state.
-
-### Important first-upgrade note
-
-Versions up to 0.4.0 did not persist the Chrome profile outside the container. Therefore the update **to 0.5.0 itself may reset the existing ephemeral Chrome profile one final time**. Once Chrome is configured under 0.5.0, subsequent restarts and updates use the persistent profile.
-
-The persistent Chrome profile can contain authenticated sessions and cookies. Treat Home Assistant backups containing Meeting Recorder add-on data as sensitive.
-
-## Recording files
-
-Each session is stored under:
+Each recording gets a directory such as:
 
 ```text
 /media/meeting-recorder/
   YYYY-MM-DD_HHMMSS_<id>/
-    session.json
     ffmpeg.log
     segments/
       segment_00000.ogg
@@ -62,39 +43,80 @@ Each session is stored under:
       ...
     segments.txt
     audio.opus
-    transcription.log
-    transcription.json
-    transcript.json
-    transcript.txt
 ```
 
-## Whisper/Wyoming
+The rule for any downstream process is simple:
 
-Meeting Recorder does not include a second Whisper model. It acts as a Wyoming client and sends the completed recording to the Whisper service already running in Home Assistant.
-
-The default configuration is:
-
-```yaml
-whisper_enabled: true
-whisper_host: core-whisper
-whisper_port: 10300
-whisper_language: auto
-whisper_connect_timeout_seconds: 10
-whisper_read_timeout_seconds: 1800
+```text
+audio.opus does not exist  -> recording is incomplete/not finalized
+audio.opus exists          -> recording is complete and validated
 ```
 
-When `whisper_language` is `auto`, Meeting Recorder does not override the language configured in the Whisper service. Set it to values such as `es` or `en` if you want Meeting Recorder to explicitly request a language.
+To make that rule reliable, Meeting Recorder never writes directly to the final filename during assembly. It creates a temporary file in the same directory, validates its duration with ffprobe, then performs an atomic rename to `audio.opus`.
 
-The recording segments are transcribed sequentially. With the default 300-second segment length, Whisper processes at most about five minutes of meeting audio per Wyoming request. The resulting texts are concatenated in order into `transcript.txt`.
+The app still uses an internal state file at:
 
-If Whisper cannot be reached or returns an error:
+```text
+/data/meeting-recorder/state.json
+```
 
-- `audio.opus` remains untouched;
-- `transcription.json` records the error;
-- the overlay shows the error;
-- **Reintentar transcripción** runs STT again without repeating the meeting.
+That file is only for Meeting Recorder's own runtime/recovery/UI state. External consumers must not depend on it.
 
-A new recording is blocked while transcription is actively running, keeping Meeting Recorder from intentionally competing with Whisper for CPU during another meeting.
+## Transcription boundary
+
+Transcription is outside Meeting Recorder.
+
+A separate service, automation or future add-on may watch:
+
+```text
+/media/meeting-recorder/*/audio.opus
+```
+
+and process finalized recordings independently with Whisper or any other STT system.
+
+This separation means:
+
+- a slow or broken transcriber cannot block a new meeting;
+- Meeting Recorder does not need Wyoming or a Whisper client library;
+- changing STT implementation does not change the recording add-on;
+- completed audio remains the stable interface between both systems.
+
+## Persistent Google Chrome profile
+
+Google Chrome uses:
+
+```text
+/home/ubuntu/.config/google-chrome
+```
+
+Meeting Recorder redirects that profile to persistent app storage:
+
+```text
+/data/chrome-profile/google-chrome
+```
+
+Chrome preferences, cookies, site permissions, extensions and profile/session state therefore survive normal Meeting Recorder restarts and future app updates.
+
+The persistent profile can contain authenticated sessions and cookies. Treat backups of the add-on data as sensitive.
+
+## Audio topology
+
+```text
+remote meeting audio
+        |
+        v
+   output.monitor -----------+
+                              |
+                              v
+                       meeting_recorder_mix
+                              |
+client mic                    +--> meeting_recorder_mix.monitor --> FFmpeg --> Opus segments
+   |
+   v
+SelkiesVirtualMic ------------+
+```
+
+The recording sink is independent from normal playback, so the local microphone is not intentionally routed back to the user's speakers.
 
 ## Configuration
 
@@ -102,41 +124,15 @@ A new recording is blocked while transcription is actively running, keeping Meet
 shm_size_mb: 2048
 segment_seconds: 300
 audio_bitrate_kbps: 64
-whisper_enabled: true
-whisper_host: core-whisper
-whisper_port: 10300
-whisper_language: auto
-whisper_connect_timeout_seconds: 10
-whisper_read_timeout_seconds: 1800
 ```
 
-## Validation for 0.5.0
+## Privacy note about mute
 
-### Chrome persistence
-
-1. Update/install 0.5.0 and start the app.
-2. Open Chrome and change an obvious setting, such as the start/homepage behavior, or sign in to a harmless test site.
-3. Restart Meeting Recorder.
-4. Confirm the setting/session remains.
-5. Keep the profile configured for the next app update; the same profile should be reused.
-
-### Whisper
-
-1. Confirm the Home Assistant Whisper add-on/service is running.
-2. Make a short recorded test meeting.
-3. Finalize the meeting.
-4. The overlay should change to **TRANSCRIBIENDO**.
-5. Wait for **Transcripción lista**.
-6. Open the meeting folder under Home Assistant Media and check `transcript.txt`.
-7. Confirm that the text corresponds to both sides of the recorded conversation.
-
-If transcription fails, inspect `transcription.log` and the error shown in the overlay. The recording remains available independently.
+Meeting Recorder records the Selkies virtual microphone source. A meeting application can implement its own mute in software while leaving that source open. Therefore the reliable privacy boundary for the local recording remains the microphone control at the Selkies/client layer.
 
 ## Remaining work
 
-- recovery/assembly after a hard host crash beyond already closed segments;
-- recording/transcript history UI;
-- platform-aware mute semantics;
-- optional transcript formatting/speaker diarization if desired later;
-- GPU acceleration work;
-- removal of the temporary `SYS_ADMIN` / AppArmor compromise used to resize `/dev/shm`.
+- recovery/finalization after a hard host crash using already closed segments;
+- recording history/playback UI;
+- platform-aware mute semantics if a generic solution is found;
+- removal/replacement of the temporary `SYS_ADMIN` / AppArmor compromise used to resize `/dev/shm`.
