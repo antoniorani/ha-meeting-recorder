@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.1
+
+- Make Whisper activity visible in the main add-on log instead of only in a per-session file.
+- Split post-meeting transcription into configurable 60-second chunks by default.
+- Add stage/heartbeat information while connecting, sending audio and waiting for Whisper.
+- Write `transcript.partial.txt` after every completed chunk so progress is durable and visible before the whole meeting finishes.
+- Keep `transcription.log` as a per-session diagnostic log while mirroring the same worker messages to the add-on log.
+- Add `whisper_chunk_seconds` configuration.
+
+
 ## 0.5.0
 
 - Persist the Google Chrome profile under `/data/chrome-profile/google-chrome` so browser preferences, cookies, site permissions, extensions and session state survive add-on restarts and future image updates.
