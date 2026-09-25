@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1
+
+- Fix recording start failure on HAOS when the API runs as the non-root `ubuntu` user.
+- Store persistent recorder state in `/data/meeting-recorder/state.json` instead of writing directly to root-owned `/data`.
+- Create and own a dedicated `/data/meeting-recorder` directory at container startup.
+
+
 ## 0.3.0
 
 - Add an internal Nginx gateway in front of Selkies while keeping Home Assistant Ingress on port 8080.
