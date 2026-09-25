@@ -223,21 +223,7 @@
     const warnings = Array.isArray(status?.warnings) ? status.warnings : [];
     if (transcribing) {
       const current = transcription.current_segment || "";
-      const stage = transcription.stage || "";
-      const waiting = transcription.waiting_seconds || 0;
-      if (stage === "waiting_whisper") {
-        message.textContent = `Whisper procesando ${current || ""}${waiting ? ` · ${waiting}s` : ""}`;
-      } else if (stage === "sending_audio") {
-        const sent = transcription.audio_seconds_sent ?? 0;
-        const totalAudio = transcription.audio_seconds_total ?? "?";
-        message.textContent = `Enviando audio a Whisper: ${sent}/${totalAudio}s`;
-      } else if (stage === "connecting") {
-        message.textContent = "Conectando con Whisper…";
-      } else if (stage === "chunk_completed") {
-        message.textContent = "Bloque transcrito; preparando el siguiente…";
-      } else {
-        message.textContent = current ? `Whisper: ${current}` : "Whisper preparando transcripción…";
-      }
+      message.textContent = current ? `Whisper: ${current}` : "Whisper preparando transcripción…";
       message.title = message.textContent;
     } else if (transcriptionError) {
       message.textContent = `Whisper: ${transcription.error || "error de transcripción"}`;

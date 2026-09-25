@@ -80,7 +80,6 @@ jobs:
               "whisper_language",
               "whisper_connect_timeout_seconds",
               "whisper_read_timeout_seconds",
-              "whisper_chunk_seconds",
           ):
               if key not in config.get("options", {}) or key not in config.get("schema", {}):
                   raise SystemExit(f"Missing recording option/schema: {key}")
@@ -150,7 +149,7 @@ jobs:
               raise SystemExit("Wyoming client must be pinned to 1.10.2")
 
           transcriber = Path("meeting-recorder/rootfs/usr/local/bin/meeting-recorder-transcribe").read_text(encoding="utf-8")
-          for required in ("AsyncTcpClient", "Transcribe", "AudioStart", "AudioChunk", "AudioStop", "transcript.txt", "transcript.partial.txt", "waiting_whisper"):
+          for required in ("AsyncTcpClient", "Transcribe", "AudioStart", "AudioChunk", "AudioStop", "transcript.txt"):
               if required not in transcriber:
                   raise SystemExit(f"Missing Wyoming transcription implementation: {required}")
 
