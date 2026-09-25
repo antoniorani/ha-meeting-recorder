@@ -34,6 +34,7 @@ RUN test -x /etc/container-entrypoint.sh && \
     PYTHONPATH=/opt/meeting-recorder-python python3 -c 'import wyoming' && \
     chmod 0755 \
       /usr/local/bin/ha-meeting-recorder-entrypoint \
-      /usr/local/bin/meeting-recorder-api
+      /usr/local/bin/meeting-recorder-api \
+      /usr/local/bin/meeting-recorder-transcribe
 
 ENTRYPOINT ["/usr/local/bin/ha-meeting-recorder-entrypoint"]
