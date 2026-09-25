@@ -259,6 +259,7 @@ class Recorder:
         self.scheduled_end_epoch: Optional[float] = None
         self.scheduler_stop = threading.Event()
         self.transcriber: Optional[subprocess.Popen[str]] = None
+        self.transcription_log = None
         self.transcription_session_dir: Optional[Path] = None
         self._restore_state()
         self.scheduler = threading.Thread(
@@ -330,6 +331,9 @@ class Recorder:
             return False
         if proc.poll() is None:
             return True
+        if self.transcription_log is not None:
+            self.transcription_log.close()
+            self.transcription_log = None
         self.transcriber = None
         return False
 
@@ -383,14 +387,16 @@ class Recorder:
         if not audio_path.exists():
             raise RuntimeError("Cannot transcribe: final audio.opus does not exist")
 
+        log_path = session_dir / "transcription.log"
+        self.transcription_log = log_path.open("a", encoding="utf-8")
         env = os.environ.copy()
         self.transcriber = subprocess.Popen(
             [
                 "/usr/local/bin/meeting-recorder-transcribe",
                 str(session_dir),
             ],
-            stdout=None,
-            stderr=None,
+            stdout=self.transcription_log,
+            stderr=subprocess.STDOUT,
             text=True,
             start_new_session=True,
             env=env,

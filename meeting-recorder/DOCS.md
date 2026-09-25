@@ -8,7 +8,7 @@ The target HAOS host has already validated:
 - audio-only recording with remote audio + forwarded microphone;
 - manual and scheduled meeting finalization.
 
-Version **0.5.1** keeps those two pieces and improves Whisper observability/reliability. Version 0.5.0 added: a persistent Google Chrome profile and automatic post-meeting Whisper transcription.
+Version **0.5.0** adds two important pieces: a persistent Google Chrome profile and automatic post-meeting Whisper transcription.
 
 ## Normal flow
 
@@ -81,12 +81,11 @@ whisper_port: 10300
 whisper_language: auto
 whisper_connect_timeout_seconds: 10
 whisper_read_timeout_seconds: 1800
-whisper_chunk_seconds: 60
 ```
 
 When `whisper_language` is `auto`, Meeting Recorder does not override the language configured in the Whisper service. Set it to values such as `es` or `en` if you want Meeting Recorder to explicitly request a language.
 
-Whisper transcription uses independent 60-second chunks by default, regardless of the 5-minute recording segment size. Progress is written to `transcription.json`; every completed chunk is also appended to `transcript.partial.txt`. Once all chunks finish, the final ordered text is written to `transcript.txt`.
+The recording segments are transcribed sequentially. With the default 300-second segment length, Whisper processes at most about five minutes of meeting audio per Wyoming request. The resulting texts are concatenated in order into `transcript.txt`.
 
 If Whisper cannot be reached or returns an error:
 
