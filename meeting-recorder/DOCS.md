@@ -23,7 +23,11 @@ Home Assistant handles HTTPS and authentication. Selkies only listens on plain H
 9. Return to Meeting Recorder through Home Assistant.
 10. Confirm that the same remote desktop and same Chrome window are still present.
 
-Then test microphone and webcam toggles from the Selkies sidebar. They are available but intentionally **off by default** on each client connection.
+Then open a conferencing test page such as Jitsi in the **remote Chrome**. The remote browser should enumerate a Selkies virtual microphone and virtual webcam.
+
+The capture policy is now `demand`: Selkies creates the virtual devices so conferencing applications can discover them, but it asks for the **real microphone/camera of the device running Home Assistant** only when the remote application actually opens those virtual devices.
+
+Important: browser permissions must be granted to the **outer Home Assistant page/app**, not only to Chrome inside the remote desktop. The inner Chrome permission controls whether Jitsi may use the virtual Selkies devices; the outer browser/app permission controls whether Selkies may capture your actual microphone/camera.
 
 ## Why Ingress
 
@@ -47,6 +51,7 @@ Selkies' WebSocket client derives its route prefix from the URL it is loaded fro
 - Only `amd64` is declared.
 - The app currently uses `SYS_ADMIN` and `apparmor: false` solely for the shared-memory compatibility test.
 - Microphone and webcam through the Home Assistant ingress iframe still need to be verified on the actual desktop/mobile clients.
+- If a conferencing page shows the virtual devices but capture fails, check microphone/camera permissions for the browser or Home Assistant app that is displaying Meeting Recorder.
 
 ## Why /dev/shm is handled specially
 

@@ -65,3 +65,19 @@ jobs:
 
           print("Home Assistant app config: basic checks OK")
           PY
+
+      - name: Check capture policy
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          text = Path("meeting-recorder/rootfs/usr/local/bin/ha-meeting-recorder-entrypoint").read_text(encoding="utf-8")
+          required = (
+              "export SELKIES_MICROPHONE_ON_START=demand",
+              "export SELKIES_WEBCAM_ON_START=demand",
+          )
+          missing = [line for line in required if line not in text]
+          if missing:
+              raise SystemExit("Missing demand capture settings: " + ", ".join(missing))
+          print("Selkies capture demand policy: OK")
+          PY
