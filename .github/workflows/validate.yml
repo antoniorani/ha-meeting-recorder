@@ -98,5 +98,14 @@ jobs:
               if required not in nginx:
                   raise SystemExit(f"Missing nginx gateway setting: {required}")
 
-          print("Selkies capture and gateway policy: OK")
+          api = Path("meeting-recorder/rootfs/usr/local/bin/meeting-recorder-api").read_text(encoding="utf-8")
+          if 'STATE_DIR = Path("/data/meeting-recorder")' not in api:
+              raise SystemExit("Recorder state must live in /data/meeting-recorder")
+
+          entry = Path("meeting-recorder/rootfs/usr/local/bin/ha-meeting-recorder-entrypoint").read_text(encoding="utf-8")
+          for required in ('STATE_DIR="/data/meeting-recorder"', 'chown 1000:1000 "${STATE_DIR}"'):
+              if required not in entry:
+                  raise SystemExit(f"Missing writable recorder state setup: {required}")
+
+          print("Selkies capture, gateway and state-directory policy: OK")
           PY
