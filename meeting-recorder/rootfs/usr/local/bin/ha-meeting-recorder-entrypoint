@@ -4,6 +4,7 @@ set -euo pipefail
 OPTIONS_FILE="/data/options.json"
 RUNTIME_DIR="/tmp/runtime-ubuntu"
 MEDIA_DIR="/media/meeting-recorder"
+STATE_DIR="/data/meeting-recorder"
 
 read_option() {
   local key="$1"
@@ -49,6 +50,13 @@ fi
 mkdir -p "${MEDIA_DIR}"
 chown 1000:1000 "${MEDIA_DIR}"
 
+# /data itself is Supervisor-managed and may be root-owned. The recording API
+# runs as ubuntu so give it a dedicated persistent state directory instead of
+# writing directly into /data.
+mkdir -p "${STATE_DIR}"
+chown 1000:1000 "${STATE_DIR}"
+chmod 0750 "${STATE_DIR}"
+
 # Nginx owns the Home Assistant Ingress port. Selkies stays private behind it.
 export SELKIES_PORT=8081
 export SELKIES_ENABLE_HTTPS=false
@@ -77,6 +85,7 @@ echo "[meeting-recorder] /dev/shm target: ${shm_size_mb} MiB."
 echo "[meeting-recorder] Selkies internal port: 8081."
 echo "[meeting-recorder] Meeting Recorder gateway/API ingress port: 8080."
 echo "[meeting-recorder] Recordings directory: ${MEDIA_DIR}."
+echo "[meeting-recorder] State directory: ${STATE_DIR}."
 
 nginx -t
 nginx
