@@ -1,7 +1,7 @@
 name: "Meeting Recorder"
-version: "0.2.1"
+version: "0.3.0"
 slug: "meeting_recorder"
-description: "Experimental persistent Selkies browser session for the Meeting Recorder MVP"
+description: "Persistent meeting browser with on-demand audio recording"
 url: "https://github.com/antoniorani/ha-meeting-recorder"
 arch:
   - amd64
@@ -18,7 +18,14 @@ ingress_stream: true
 panel_title: "Meeting Recorder"
 panel_icon: "mdi:record-rec"
 panel_admin: true
+map:
+  - type: media
+    read_only: false
 options:
   shm_size_mb: 2048
+  segment_seconds: 300
+  audio_bitrate_kbps: 64
 schema:
   shm_size_mb: "int(512,4096)"
+  segment_seconds: "int(30,1800)"
+  audio_bitrate_kbps: "int(32,192)"
