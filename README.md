@@ -6,15 +6,15 @@ Experimental Home Assistant OS app for a persistent remote browser session that:
 - lets the user join any compatible meeting manually in Google Chrome;
 - forwards microphone and webcam to that persistent browser session;
 - records **audio only**;
-- starts audio recording manually or at a scheduled time;
-- finalizes the meeting manually or at a scheduled time;
+- starts and stops audio recording manually with a single Play/Stop control;
+- supports an editable scheduled recording window with independent start and end times;
 - persists the Google Chrome profile across app restarts and updates.
 
 ## Current status
 
 **Recording-only architecture.**
 
-The persistent browser, Ingress, audio/video forwarding, audio-only recording, manual/scheduled finalization and Chrome-profile persistence have been validated on the target HAOS host. Scheduled recording start is implemented in 0.7.0 and still needs target-host runtime validation.
+The persistent browser, Ingress, audio/video forwarding, audio-only recording, generic meeting finalization and Chrome-profile persistence have been validated on the target HAOS host. The simplified 0.8.0 recording controls and editable start/end schedule still need target-host runtime validation.
 
 Transcription is deliberately **outside this app**. Meeting Recorder's output contract is a finalized `audio.opus` in the session directory. Downstream transcription or processing can consume that file independently.
 
