@@ -790,7 +790,7 @@ RECORDER = Recorder()
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "MeetingRecorder/0.8"
+    server_version = "MeetingRecorder/0.8.1"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         log(fmt % args)
