@@ -427,12 +427,27 @@ class Recorder:
 
     def cleanup_retention(self) -> dict[str, int]:
         with self.lock:
-            active = (
-                self.session_dir
-                if self.ffmpeg is not None and self.ffmpeg.poll() is None
-                else None
-            )
-        return cleanup_recordings(MEDIA_ROOT, active_session=active)
+            running = self.ffmpeg is not None and self.ffmpeg.poll() is None
+            active = self.session_dir if running else None
+            result = cleanup_recordings(MEDIA_ROOT, active_session=active)
+
+            state_changed = False
+            if not running and self.session_dir is not None and not self.session_dir.exists():
+                self.session_id = None
+                self.session_dir = None
+                self.started_at = None
+                state_changed = True
+
+            if self.last_completed is not None:
+                audio_path = str(self.last_completed.get("audio_path") or "").strip()
+                if audio_path and not Path(audio_path).exists():
+                    self.last_completed = None
+                    state_changed = True
+
+            if state_changed:
+                self._persist_current_state()
+
+            return result
 
     def _scheduler_loop(self) -> None:
         next_retention_sweep = time.monotonic() + RETENTION_SWEEP_SECONDS
