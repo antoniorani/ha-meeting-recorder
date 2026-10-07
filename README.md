@@ -14,7 +14,7 @@ Experimental Home Assistant OS app for a persistent remote browser session that:
 
 **Recording-only architecture.**
 
-The persistent browser, Ingress, audio/video forwarding, audio-only recording, scheduled recording start, manual/scheduled finalization and Chrome-profile persistence have been validated on the target HAOS host.
+The persistent browser, Ingress, audio/video forwarding, audio-only recording, manual/scheduled finalization and Chrome-profile persistence have been validated on the target HAOS host. Scheduled recording start is implemented in 0.7.0 and still needs target-host runtime validation.
 
 Transcription is deliberately **outside this app**. Meeting Recorder's output contract is a finalized `audio.opus` in the session directory. Downstream transcription or processing can consume that file independently.
 
