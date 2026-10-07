@@ -105,6 +105,8 @@ jobs:
       - name: Check Home Assistant app configuration
         run: |
           python - <<'PY'
+          from pathlib import Path
+          import struct
           import yaml
 
           with open("meeting-recorder/config.yaml", encoding="utf-8") as handle:
@@ -117,6 +119,19 @@ jobs:
 
           if config["arch"] != ["amd64"]:
               raise SystemExit("Current target must declare amd64 only")
+
+          if config.get("stage", "stable") != "stable":
+              raise SystemExit("Meeting Recorder must be published with the stable lifecycle stage")
+
+          if config.get("panel_icon") != "mdi:record-rec":
+              raise SystemExit("Meeting Recorder must keep its recorder sidebar icon")
+
+          icon = Path("meeting-recorder/icon.png").read_bytes()
+          if icon[:8] != b"\x89PNG\r\n\x1a\n" or icon[12:16] != b"IHDR":
+              raise SystemExit("meeting-recorder/icon.png must be a PNG image")
+          width, height = struct.unpack(">II", icon[16:24])
+          if (width, height) != (128, 128):
+              raise SystemExit(f"App icon must be 128x128, got {width}x{height}")
 
           if config.get("ingress") is not True or config.get("ingress_port") != 8080:
               raise SystemExit("Meeting Recorder must use Home Assistant Ingress on port 8080")
@@ -196,9 +211,25 @@ jobs:
               raise SystemExit("Missing finalization/scheduler API pieces: " + ", ".join(missing_api))
 
           controls = Path("meeting-recorder/rootfs/usr/local/share/meeting-recorder/controls.js").read_text(encoding="utf-8")
-          for required in ("PLAY_ICON", "STOP_ICON", "Inicio", "Fin", "recording/schedule", "recording/stop", 'addEventListener("change", syncSchedule)'):
+          for required in (
+              "PLAY_ICON",
+              "STOP_ICON",
+              "Inicio",
+              "Fin",
+              "recording/schedule",
+              "recording/stop",
+              'addEventListener("change", syncSchedule)',
+              "TOOLBAR_STATE_KEY",
+              'id="mr-drag"',
+              'id="mr-minimize"',
+              'addEventListener("pointerdown", startToolbarDrag)',
+              'addEventListener("pointermove", moveToolbar)',
+              "localStorage.setItem",
+              'classList.toggle("minimized"',
+              '"Mostrar barra"',
+          ):
               if required not in controls:
-                  raise SystemExit(f"Missing auto-save recorder control: {required}")
+                  raise SystemExit(f"Missing recorder toolbar behavior: {required}")
 
           for forbidden in ('id="mr-save"', 'id="mr-clear"', ">Guardar<", ">Limpiar<"):
               if forbidden in controls:
