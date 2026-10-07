@@ -44,7 +44,7 @@
     #mr-finish { background: #f3f3f3; color: #111; }
     #mr-schedule { background: #ded6ff; color: #111; }
     #mr-cancel-schedule { background: #3b3b42; color: #fff; }
-    #mr-end-time {
+    #mr-schedule-time {
       background: #fff;
       color: #111;
       min-width: 190px;
@@ -92,7 +92,7 @@
         left: 8px;
         justify-content: center;
       }
-      #mr-end-time {
+      #mr-schedule-time {
         min-width: 170px;
         flex: 1 1 170px;
       }
@@ -113,8 +113,8 @@
     <span id="mr-state"><span id="mr-dot"></span><span id="mr-label">Preparando…</span></span>
     <button id="mr-start" type="button">Iniciar grabación</button>
     <button id="mr-finish" type="button">Finalizar reunión y grabación</button>
-    <input id="mr-end-time" type="datetime-local" step="60" aria-label="Fecha y hora de finalización">
-    <button id="mr-schedule" type="button">Programar fin</button>
+    <input id="mr-schedule-time" type="datetime-local" step="60" aria-label="Fecha y hora programada">
+    <button id="mr-schedule" type="button">Programar inicio</button>
     <button id="mr-cancel-schedule" type="button" disabled>Cancelar fin</button>
     <span id="mr-scheduled"></span>
     <span id="mr-msg" aria-live="polite"></span>
@@ -123,7 +123,7 @@
 
   const startButton = root.querySelector("#mr-start");
   const finishButton = root.querySelector("#mr-finish");
-  const endTimeInput = root.querySelector("#mr-end-time");
+  const scheduleTimeInput = root.querySelector("#mr-schedule-time");
   const scheduleButton = root.querySelector("#mr-schedule");
   const cancelScheduleButton = root.querySelector("#mr-cancel-schedule");
   const scheduledLabel = root.querySelector("#mr-scheduled");
@@ -133,6 +133,7 @@
   let startedAt = null;
   let lastStatus = null;
   let busy = false;
+  let scheduleMode = null;
 
   const api = (path) => new URL(path, apiBase);
 
@@ -170,13 +171,24 @@
     lastStatus = status;
     const recording = Boolean(status && status.recording);
     const browserRunning = Boolean(status && status.browser_running);
-    const scheduled = status?.scheduled_end_at || null;
+    const scheduledStart = status?.scheduled_start_at || null;
+    const scheduledEnd = status?.scheduled_end_at || null;
+    const nextScheduleMode = recording ? "end" : "start";
+    const scheduled = recording ? scheduledEnd : scheduledStart;
+
+    if (scheduleMode !== nextScheduleMode) {
+      scheduleMode = nextScheduleMode;
+      if (document.activeElement !== scheduleTimeInput) {
+        scheduleTimeInput.value = toDatetimeLocal(scheduled);
+      }
+    }
 
     root.classList.toggle("recording", recording);
     startButton.disabled = busy || recording || !status?.audio_ready;
     finishButton.disabled = busy || (!recording && !browserRunning);
-    endTimeInput.disabled = busy || !recording;
-    scheduleButton.disabled = busy || !recording || !endTimeInput.value;
+    scheduleTimeInput.disabled = busy;
+    scheduleButton.textContent = recording ? "Programar fin" : "Programar inicio";
+    scheduleButton.disabled = busy || !scheduleTimeInput.value;
     cancelScheduleButton.disabled = busy || !scheduled;
 
     if (recording) {
@@ -191,10 +203,10 @@
     }
 
     if (scheduled) {
-      scheduledLabel.textContent = `Fin: ${new Date(scheduled).toLocaleString()}`;
+      scheduledLabel.textContent = `${recording ? "Fin" : "Inicio"}: ${new Date(scheduled).toLocaleString()}`;
       scheduledLabel.title = scheduled;
-      if (document.activeElement !== endTimeInput) {
-        endTimeInput.value = toDatetimeLocal(scheduled);
+      if (document.activeElement !== scheduleTimeInput) {
+        scheduleTimeInput.value = toDatetimeLocal(scheduled);
       }
     } else {
       scheduledLabel.textContent = "";
@@ -248,19 +260,22 @@
   }
 
   async function setSchedule() {
-    if (busy || !endTimeInput.value) return;
-    const date = new Date(endTimeInput.value);
+    if (busy || !scheduleTimeInput.value) return;
+    const date = new Date(scheduleTimeInput.value);
     if (Number.isNaN(date.getTime())) {
       message.textContent = "Fecha/hora no válida";
       return;
     }
+    const recording = Boolean(lastStatus?.recording);
+    const endpoint = recording ? "meeting/end-time" : "meeting/start-time";
+    const field = recording ? "scheduled_end_at" : "scheduled_start_at";
     busy = true;
     if (lastStatus) render(lastStatus);
     try {
-      render(await request("meeting/end-time", {
+      render(await request(endpoint, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scheduled_end_at: date.toISOString() }),
+        body: JSON.stringify({ [field]: date.toISOString() }),
       }));
     } catch (error) {
       message.textContent = error.message;
@@ -273,11 +288,13 @@
 
   async function cancelSchedule() {
     if (busy) return;
+    const recording = Boolean(lastStatus?.recording);
+    const endpoint = recording ? "meeting/end-time" : "meeting/start-time";
     busy = true;
     if (lastStatus) render(lastStatus);
     try {
-      render(await request("meeting/end-time", { method: "DELETE" }));
-      endTimeInput.value = "";
+      render(await request(endpoint, { method: "DELETE" }));
+      scheduleTimeInput.value = "";
     } catch (error) {
       message.textContent = error.message;
       message.title = error.message;
@@ -294,8 +311,8 @@
     );
     if (ok) postAction("meeting/stop");
   });
-  endTimeInput.addEventListener("input", () => {
-    scheduleButton.disabled = busy || !lastStatus?.recording || !endTimeInput.value;
+  scheduleTimeInput.addEventListener("input", () => {
+    scheduleButton.disabled = busy || !scheduleTimeInput.value;
   });
   scheduleButton.addEventListener("click", setSchedule);
   cancelScheduleButton.addEventListener("click", cancelSchedule);
