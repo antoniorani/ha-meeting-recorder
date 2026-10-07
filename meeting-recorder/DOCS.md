@@ -8,11 +8,11 @@ The target HAOS host has already validated:
 - Home Assistant Ingress;
 - remote audio, microphone and webcam;
 - audio-only recording containing remote audio + forwarded microphone;
-- manual and scheduled recording start;
+- manual recording start;
 - manual and scheduled meeting finalization;
 - persistent Google Chrome configuration across add-on restarts/updates.
 
-Version **0.6.0** deliberately removes transcription from this add-on.
+Version **0.6.0** deliberately removes transcription from this add-on. Scheduled recording start is implemented in **0.7.0** and should still be runtime-validated on the target HAOS host.
 
 ## Normal flow
 
