@@ -11,6 +11,17 @@
 
   const apiBase = new URL("api/", script.src);
 
+  const PLAY_ICON = `
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M8 5.8v12.4L18.2 12 8 5.8Z"></path>
+    </svg>
+  `;
+  const STOP_ICON = `
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="7" y="7" width="10" height="10" rx="1.2"></rect>
+    </svg>
+  `;
+
   const style = document.createElement("style");
   style.textContent = `
     #mr-control {
@@ -20,86 +31,160 @@
       z-index: 2147483647;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
+      max-width: calc(100vw - 24px);
       padding: 8px 10px;
       border-radius: 14px;
       background: rgba(20, 20, 24, .94);
       color: #fff;
-      font: 600 13px/1.2 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       box-shadow: 0 4px 24px rgba(0, 0, 0, .35);
       backdrop-filter: blur(8px);
-      max-width: calc(100vw - 24px);
-      flex-wrap: wrap;
+      font: 600 13px/1.2 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
+
     #mr-control button,
     #mr-control input {
-      border: 0;
-      border-radius: 10px;
-      padding: 9px 12px;
       font: inherit;
       touch-action: manipulation;
     }
-    #mr-control button { cursor: pointer; }
-    #mr-start { background: #e34ba9; color: #111; }
-    #mr-finish { background: #f3f3f3; color: #111; }
-    #mr-schedule { background: #ded6ff; color: #111; }
-    #mr-cancel-schedule { background: #3b3b42; color: #fff; }
-    #mr-schedule-time {
+
+    #mr-toggle {
+      width: 42px;
+      height: 42px;
+      display: inline-grid;
+      place-items: center;
+      flex: 0 0 42px;
+      border: 0;
+      border-radius: 50%;
+      background: #f3f3f3;
+      color: #111;
+      cursor: pointer;
+    }
+
+    #mr-toggle svg {
+      width: 22px;
+      height: 22px;
+      fill: currentColor;
+    }
+
+    #mr-control.recording #mr-toggle {
+      background: #ff4965;
+      color: #111;
+    }
+
+    #mr-state {
+      min-width: 76px;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #mr-schedule {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .mr-field {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+    }
+
+    .mr-field > span {
+      color: #cfcfd5;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .mr-field input {
+      min-width: 174px;
+      border: 0;
+      border-radius: 9px;
+      padding: 8px 9px;
       background: #fff;
       color: #111;
-      min-width: 190px;
     }
+
+    .mr-field input:disabled {
+      background: #dedee3;
+      color: #555;
+      opacity: 1;
+    }
+
+    #mr-save,
+    #mr-clear {
+      min-height: 34px;
+      border: 0;
+      border-radius: 9px;
+      padding: 8px 10px;
+      cursor: pointer;
+    }
+
+    #mr-save {
+      background: #ded6ff;
+      color: #111;
+    }
+
+    #mr-clear {
+      background: #3b3b42;
+      color: #fff;
+    }
+
     #mr-control button:disabled,
     #mr-control input:disabled {
-      opacity: .45;
       cursor: default;
     }
-    #mr-state {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      white-space: nowrap;
-      min-width: 82px;
+
+    #mr-control button:disabled {
+      opacity: .42;
     }
-    #mr-dot {
-      width: 9px;
-      height: 9px;
-      border-radius: 50%;
-      background: #777;
-      flex: 0 0 auto;
-    }
-    #mr-control.recording #mr-dot {
-      background: #ff334f;
-      box-shadow: 0 0 0 4px rgba(255, 51, 79, .18);
-    }
-    #mr-scheduled {
-      color: #ddd;
-      white-space: nowrap;
-      font-weight: 500;
-    }
+
     #mr-msg {
-      max-width: 320px;
+      max-width: 260px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
       color: #ffb6c7;
       font-weight: 500;
     }
-    @media (max-width: 780px) {
+
+    @media (max-width: 900px) {
       #mr-control {
         top: 8px;
         right: 8px;
         left: 8px;
-        justify-content: center;
+        flex-wrap: wrap;
       }
-      #mr-schedule-time {
-        min-width: 170px;
-        flex: 1 1 170px;
-      }
-      #mr-msg {
+
+      #mr-schedule {
+        order: 3;
         width: 100%;
-        text-align: center;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto;
+        align-items: end;
+      }
+
+      .mr-field input {
+        width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+      }
+
+      #mr-msg {
+        flex: 1 1 140px;
         max-width: none;
+      }
+    }
+
+    @media (max-width: 560px) {
+      #mr-schedule {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      }
+
+      #mr-save,
+      #mr-clear {
+        width: 100%;
       }
     }
   `;
@@ -110,30 +195,37 @@
   root.setAttribute("role", "region");
   root.setAttribute("aria-label", "Controles de Meeting Recorder");
   root.innerHTML = `
-    <span id="mr-state"><span id="mr-dot"></span><span id="mr-label">Preparando…</span></span>
-    <button id="mr-start" type="button">Iniciar grabación</button>
-    <button id="mr-finish" type="button">Finalizar reunión y grabación</button>
-    <input id="mr-schedule-time" type="datetime-local" step="60" aria-label="Fecha y hora programada">
-    <button id="mr-schedule" type="button">Programar inicio</button>
-    <button id="mr-cancel-schedule" type="button" disabled>Cancelar inicio</button>
-    <span id="mr-scheduled"></span>
+    <button id="mr-toggle" type="button" aria-label="Iniciar grabación" title="Iniciar grabación">${PLAY_ICON}</button>
+    <span id="mr-state">Preparando…</span>
+    <div id="mr-schedule">
+      <label class="mr-field">
+        <span>Inicio</span>
+        <input id="mr-start-time" type="datetime-local" step="60" aria-label="Inicio programado">
+      </label>
+      <label class="mr-field">
+        <span>Fin</span>
+        <input id="mr-end-time" type="datetime-local" step="60" aria-label="Fin programado">
+      </label>
+      <button id="mr-save" type="button" disabled>Guardar</button>
+      <button id="mr-clear" type="button" disabled>Limpiar</button>
+    </div>
     <span id="mr-msg" aria-live="polite"></span>
   `;
   document.body.appendChild(root);
 
-  const startButton = root.querySelector("#mr-start");
-  const finishButton = root.querySelector("#mr-finish");
-  const scheduleTimeInput = root.querySelector("#mr-schedule-time");
-  const scheduleButton = root.querySelector("#mr-schedule");
-  const cancelScheduleButton = root.querySelector("#mr-cancel-schedule");
-  const scheduledLabel = root.querySelector("#mr-scheduled");
-  const label = root.querySelector("#mr-label");
+  const toggleButton = root.querySelector("#mr-toggle");
+  const stateLabel = root.querySelector("#mr-state");
+  const startTimeInput = root.querySelector("#mr-start-time");
+  const endTimeInput = root.querySelector("#mr-end-time");
+  const saveButton = root.querySelector("#mr-save");
+  const clearButton = root.querySelector("#mr-clear");
   const message = root.querySelector("#mr-msg");
 
   let startedAt = null;
   let lastStatus = null;
+  let lastRecording = null;
   let busy = false;
-  let scheduleMode = null;
+  let scheduleDirty = false;
 
   const api = (path) => new URL(path, apiBase);
 
@@ -148,6 +240,11 @@
       throw new Error(data.error || `HTTP ${response.status}`);
     }
     return data;
+  }
+
+  function setMessage(text, title = text) {
+    message.textContent = text || "";
+    message.title = title || "";
   }
 
   function elapsedText() {
@@ -167,66 +264,73 @@
     return local.toISOString().slice(0, 16);
   }
 
+  function parseInput(input, label) {
+    if (!input.value) return null;
+    const date = new Date(input.value);
+    if (Number.isNaN(date.getTime())) {
+      throw new Error(`${label}: fecha/hora no válida`);
+    }
+    return date;
+  }
+
   function render(status) {
     lastStatus = status;
-    const recording = Boolean(status && status.recording);
-    const browserRunning = Boolean(status && status.browser_running);
+    const recording = Boolean(status?.recording);
     const scheduledStart = status?.scheduled_start_at || null;
     const scheduledEnd = status?.scheduled_end_at || null;
-    const nextScheduleMode = recording ? "end" : "start";
-    const scheduled = recording ? scheduledEnd : scheduledStart;
 
-    if (scheduleMode !== nextScheduleMode) {
-      scheduleMode = nextScheduleMode;
-      if (document.activeElement !== scheduleTimeInput) {
-        scheduleTimeInput.value = toDatetimeLocal(scheduled);
-      }
+    if (lastRecording !== null && lastRecording !== recording) {
+      scheduleDirty = false;
     }
+    lastRecording = recording;
 
     root.classList.toggle("recording", recording);
-    startButton.disabled = busy || recording || !status?.audio_ready;
-    finishButton.disabled = busy || (!recording && !browserRunning);
-    scheduleTimeInput.disabled = busy;
-    scheduleButton.textContent = recording ? "Programar fin" : "Programar inicio";
-    cancelScheduleButton.textContent = recording ? "Cancelar fin" : "Cancelar inicio";
-    scheduleButton.disabled = busy || !scheduleTimeInput.value;
-    cancelScheduleButton.disabled = busy || !scheduled;
+    toggleButton.innerHTML = recording ? STOP_ICON : PLAY_ICON;
+    toggleButton.setAttribute(
+      "aria-label",
+      recording ? "Finalizar grabación" : "Iniciar grabación"
+    );
+    toggleButton.title = recording ? "Finalizar grabación" : "Iniciar grabación";
+    toggleButton.disabled = busy || (!recording && !status?.audio_ready);
+
+    startTimeInput.disabled = busy || recording;
+    endTimeInput.disabled = busy;
+    saveButton.disabled = busy || !scheduleDirty;
+    clearButton.disabled =
+      busy || (!scheduleDirty && !scheduledStart && !scheduledEnd);
 
     if (recording) {
       if (status.started_at) {
         const parsed = Date.parse(status.started_at);
         startedAt = Number.isFinite(parsed) ? parsed : startedAt;
       }
-      label.textContent = elapsedText();
+      stateLabel.textContent = elapsedText();
     } else {
       startedAt = null;
-      label.textContent = status?.audio_ready ? "LISTO" : "AUDIO…";
+      stateLabel.textContent = status?.audio_ready ? "LISTO" : "AUDIO…";
     }
 
-    if (scheduled) {
-      scheduledLabel.textContent = `${recording ? "Fin" : "Inicio"}: ${new Date(scheduled).toLocaleString()}`;
-      scheduledLabel.title = scheduled;
-      if (document.activeElement !== scheduleTimeInput) {
-        scheduleTimeInput.value = toDatetimeLocal(scheduled);
-      }
-    } else {
-      scheduledLabel.textContent = "";
-      scheduledLabel.title = "";
+    if (recording) {
+      startTimeInput.value = toDatetimeLocal(status?.started_at);
+    } else if (!scheduleDirty) {
+      startTimeInput.value = toDatetimeLocal(scheduledStart);
+    }
+    if (!scheduleDirty) {
+      endTimeInput.value = toDatetimeLocal(scheduledEnd);
     }
 
     const warnings = Array.isArray(status?.warnings) ? status.warnings : [];
     if (status?.last_error) {
-      message.textContent = status.last_error;
-      message.title = status.last_error;
+      setMessage(status.last_error);
     } else if (warnings.includes("virtual_microphone_not_available_at_start")) {
-      message.textContent = "Grabando sin micro hasta que aparezca";
-      message.title = "El audio remoto se está grabando; el micrófono se añadirá automáticamente cuando Selkies lo publique.";
+      setMessage(
+        "Grabando sin micro hasta que aparezca",
+        "El audio remoto se está grabando; el micrófono se añadirá automáticamente cuando Selkies lo publique."
+      );
     } else if (status?.last_completed?.audio_path && !recording) {
-      message.textContent = "Audio guardado";
-      message.title = status.last_completed.audio_path;
+      setMessage("Audio guardado", status.last_completed.audio_path);
     } else {
-      message.textContent = "";
-      message.title = "";
+      setMessage("");
     }
   }
 
@@ -234,93 +338,106 @@
     try {
       render(await request("status"));
     } catch (error) {
-      label.textContent = "API…";
-      message.textContent = error.message;
-      message.title = error.message;
-      startButton.disabled = true;
-      finishButton.disabled = true;
-      scheduleButton.disabled = true;
-      cancelScheduleButton.disabled = true;
+      stateLabel.textContent = "API…";
+      setMessage(error.message);
+      toggleButton.disabled = true;
+      saveButton.disabled = true;
+      clearButton.disabled = true;
     }
   }
 
-  async function postAction(path) {
-    if (busy) return;
+  async function toggleRecording() {
+    if (busy || !lastStatus) return;
+    const recording = Boolean(lastStatus.recording);
     busy = true;
-    message.textContent = "";
-    if (lastStatus) render(lastStatus);
+    setMessage("");
+    render(lastStatus);
     try {
-      render(await request(path, { method: "POST" }));
+      const status = await request(
+        recording ? "recording/stop" : "recording/start",
+        { method: "POST" }
+      );
+      scheduleDirty = false;
+      render(status);
     } catch (error) {
-      message.textContent = error.message;
-      message.title = error.message;
+      setMessage(error.message);
     } finally {
       busy = false;
       await refresh();
     }
   }
 
-  async function setSchedule() {
-    if (busy || !scheduleTimeInput.value) return;
-    const date = new Date(scheduleTimeInput.value);
-    if (Number.isNaN(date.getTime())) {
-      message.textContent = "Fecha/hora no válida";
-      return;
-    }
-    const recording = Boolean(lastStatus?.recording);
-    const endpoint = recording ? "meeting/end-time" : "meeting/start-time";
-    const field = recording ? "scheduled_end_at" : "scheduled_start_at";
-    busy = true;
-    if (lastStatus) render(lastStatus);
+  async function saveSchedule() {
+    if (busy) return;
+
     try {
-      render(await request(endpoint, {
+      const recording = Boolean(lastStatus?.recording);
+      const start = recording ? null : parseInput(startTimeInput, "Inicio");
+      const end = parseInput(endTimeInput, "Fin");
+      const now = Date.now();
+
+      if (start && start.getTime() <= now + 1000) {
+        throw new Error("El inicio debe estar en el futuro");
+      }
+      if (end && end.getTime() <= now + 1000) {
+        throw new Error("El fin debe estar en el futuro");
+      }
+      if (start && end && start.getTime() >= end.getTime()) {
+        throw new Error("El fin debe ser posterior al inicio");
+      }
+
+      busy = true;
+      setMessage("");
+      render(lastStatus);
+      const status = await request("recording/schedule", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [field]: date.toISOString() }),
-      }));
+        body: JSON.stringify({
+          scheduled_start_at: start ? start.toISOString() : null,
+          scheduled_end_at: end ? end.toISOString() : null,
+        }),
+      });
+      scheduleDirty = false;
+      render(status);
     } catch (error) {
-      message.textContent = error.message;
-      message.title = error.message;
+      setMessage(error.message);
     } finally {
       busy = false;
       await refresh();
     }
   }
 
-  async function cancelSchedule() {
+  async function clearSchedule() {
     if (busy) return;
-    const recording = Boolean(lastStatus?.recording);
-    const endpoint = recording ? "meeting/end-time" : "meeting/start-time";
     busy = true;
-    if (lastStatus) render(lastStatus);
+    setMessage("");
+    render(lastStatus);
     try {
-      render(await request(endpoint, { method: "DELETE" }));
-      scheduleTimeInput.value = "";
+      const status = await request("recording/schedule", { method: "DELETE" });
+      scheduleDirty = false;
+      render(status);
     } catch (error) {
-      message.textContent = error.message;
-      message.title = error.message;
+      setMessage(error.message);
     } finally {
       busy = false;
       await refresh();
     }
   }
 
-  startButton.addEventListener("click", () => postAction("recording/start"));
-  finishButton.addEventListener("click", () => {
-    const ok = window.confirm(
-      "Se cerrará Chrome, terminará la reunión y se finalizará la grabación. ¿Continuar?"
-    );
-    if (ok) postAction("meeting/stop");
-  });
-  scheduleTimeInput.addEventListener("input", () => {
-    scheduleButton.disabled = busy || !scheduleTimeInput.value;
-  });
-  scheduleButton.addEventListener("click", setSchedule);
-  cancelScheduleButton.addEventListener("click", cancelSchedule);
+  function markScheduleDirty() {
+    scheduleDirty = true;
+    saveButton.disabled = busy;
+  }
+
+  toggleButton.addEventListener("click", toggleRecording);
+  startTimeInput.addEventListener("input", markScheduleDirty);
+  endTimeInput.addEventListener("input", markScheduleDirty);
+  saveButton.addEventListener("click", saveSchedule);
+  clearButton.addEventListener("click", clearSchedule);
 
   setInterval(() => {
     if (lastStatus?.recording) {
-      label.textContent = elapsedText();
+      stateLabel.textContent = elapsedText();
     }
   }, 1000);
   setInterval(refresh, 3000);
