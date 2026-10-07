@@ -278,24 +278,35 @@ class Recorder:
             old["state"] = "interrupted"
             old["interrupted_at"] = iso_now()
             old["scheduled_start_at"] = None
+            old["scheduled_end_at"] = None
             self.last_completed = old
             self._write_json(STATE_FILE, old)
             return
 
-        scheduled_start = str(old.get("scheduled_start_at") or "").strip()
-        if scheduled_start:
-            try:
-                canonical, epoch = parse_scheduled_time(
-                    scheduled_start,
-                    "scheduled_start_at",
-                )
-            except ValueError:
-                old["scheduled_start_at"] = None
-                self._write_json(STATE_FILE, old)
-            else:
-                self.scheduled_start_at = canonical
-                self.scheduled_start_epoch = epoch
-                log(f"Restored scheduled recording start at {canonical}.")
+        start_value = str(old.get("scheduled_start_at") or "").strip()
+        end_value = str(old.get("scheduled_end_at") or "").strip()
+        restored_start: Optional[tuple[str, float]] = None
+        restored_end: Optional[tuple[str, float]] = None
+
+        try:
+            if start_value:
+                restored_start = parse_scheduled_time(start_value, "scheduled_start_at")
+            if end_value:
+                restored_end = parse_scheduled_time(end_value, "scheduled_end_at")
+            if restored_start and restored_end and restored_start[1] >= restored_end[1]:
+                raise ValueError("scheduled_end_at must be after scheduled_start_at")
+        except ValueError:
+            old["scheduled_start_at"] = None
+            old["scheduled_end_at"] = None
+            self._write_json(STATE_FILE, old)
+            return
+
+        if restored_start:
+            self.scheduled_start_at, self.scheduled_start_epoch = restored_start
+            log(f"Restored scheduled recording start at {self.scheduled_start_at}.")
+        if restored_end:
+            self.scheduled_end_at, self.scheduled_end_epoch = restored_end
+            log(f"Restored scheduled recording end at {self.scheduled_end_at}.")
 
     @staticmethod
     def _write_json(path: Path, data: dict[str, Any]) -> None:
@@ -340,6 +351,12 @@ class Recorder:
         data = self._metadata("recording" if running else "ready")
         self._write_json(STATE_FILE, data)
 
+    def _clear_schedule(self) -> None:
+        self.scheduled_start_at = None
+        self.scheduled_start_epoch = None
+        self.scheduled_end_at = None
+        self.scheduled_end_epoch = None
+
     def _scheduler_loop(self) -> None:
         while not self.scheduler_stop.wait(0.5):
             start_due = False
@@ -351,7 +368,7 @@ class Recorder:
                     self.scheduled_start_epoch = None
                     start_due = True
                 if self.scheduled_end_epoch is not None and now >= self.scheduled_end_epoch:
-                    # Clear before executing so a slow finalization cannot fire twice.
+                    # Make the scheduled end one-shot before executing it.
                     self.scheduled_end_epoch = None
                     end_due = True
 
@@ -361,58 +378,85 @@ class Recorder:
                     self.start()
                 except Exception as exc:
                     with self.lock:
-                        self.scheduled_start_at = None
+                        self._clear_schedule()
                         self.last_error = str(exc)
                         self._persist_current_state()
                     log(f"Scheduled recording start failed: {exc}")
 
             if end_due:
-                log("Scheduled end time reached; finalizing meeting and recording.")
+                log("Scheduled end time reached; stopping recording.")
                 try:
-                    self.finalize_meeting(reason="scheduled")
+                    with self.lock:
+                        running = self.ffmpeg is not None and self.ffmpeg.poll() is None
+                    if running:
+                        self.stop()
+                    else:
+                        with self.lock:
+                            self._clear_schedule()
+                            self._persist_current_state()
+                        log("Scheduled end reached with no active recording; schedule cleared.")
                 except Exception as exc:
                     self.last_error = str(exc)
-                    log(f"Scheduled finalization failed: {exc}")
+                    log(f"Scheduled recording stop failed: {exc}")
+
+    def set_schedule(
+        self,
+        start_value: Optional[str],
+        end_value: Optional[str],
+    ) -> dict[str, Any]:
+        with self.lock:
+            running = self.ffmpeg is not None and self.ffmpeg.poll() is None
+            if running and start_value:
+                raise RuntimeError("A recording is already active; its start time cannot be rescheduled")
+
+            start: Optional[tuple[str, float]] = None
+            end: Optional[tuple[str, float]] = None
+            if start_value:
+                start = parse_scheduled_time(start_value, "scheduled_start_at")
+            if end_value:
+                end = parse_scheduled_time(end_value, "scheduled_end_at")
+            if start and end and start[1] >= end[1]:
+                raise ValueError("scheduled_end_at must be after scheduled_start_at")
+
+            self.scheduled_start_at = start[0] if start else None
+            self.scheduled_start_epoch = start[1] if start else None
+            self.scheduled_end_at = end[0] if end else None
+            self.scheduled_end_epoch = end[1] if end else None
+            self._persist_current_state()
+            log(
+                "Recording schedule updated "
+                f"(start={self.scheduled_start_at}, end={self.scheduled_end_at})."
+            )
+            return self.status()
+
+    def cancel_schedule(self) -> dict[str, Any]:
+        with self.lock:
+            self._clear_schedule()
+            self._persist_current_state()
+            log("Recording schedule cleared.")
+            return self.status()
 
     def set_start_time(self, value: str) -> dict[str, Any]:
         with self.lock:
-            running = self.ffmpeg is not None and self.ffmpeg.poll() is None
-            if running:
-                raise RuntimeError("A scheduled start time can only be set while not recording")
-            canonical, epoch = parse_scheduled_time(value, "scheduled_start_at")
-            self.scheduled_start_at = canonical
-            self.scheduled_start_epoch = epoch
-            self._persist_current_state()
-            log(f"Scheduled recording start set to {canonical}.")
-            return self.status()
+            end_value = self.scheduled_end_at
+        return self.set_schedule(value, end_value)
 
     def cancel_start_time(self) -> dict[str, Any]:
         with self.lock:
-            self.scheduled_start_at = None
-            self.scheduled_start_epoch = None
-            self._persist_current_state()
-            log("Scheduled recording start cancelled.")
-            return self.status()
+            end_value = self.scheduled_end_at
+        return self.set_schedule(None, end_value)
 
     def set_end_time(self, value: str) -> dict[str, Any]:
         with self.lock:
             running = self.ffmpeg is not None and self.ffmpeg.poll() is None
-            if not running:
-                raise RuntimeError("A scheduled end time can only be set while recording")
-            canonical, epoch = parse_scheduled_time(value, "scheduled_end_at")
-            self.scheduled_end_at = canonical
-            self.scheduled_end_epoch = epoch
-            self._persist_current_state()
-            log(f"Scheduled meeting end set to {canonical}.")
-            return self.status()
+            start_value = None if running else self.scheduled_start_at
+        return self.set_schedule(start_value, value)
 
     def cancel_end_time(self) -> dict[str, Any]:
         with self.lock:
-            self.scheduled_end_at = None
-            self.scheduled_end_epoch = None
-            self._persist_current_state()
-            log("Scheduled meeting end cancelled.")
-            return self.status()
+            running = self.ffmpeg is not None and self.ffmpeg.poll() is None
+            start_value = None if running else self.scheduled_start_at
+        return self.set_schedule(start_value, None)
 
     def diagnostics(self) -> dict[str, Any]:
         try:
@@ -476,8 +520,6 @@ class Recorder:
 
             self.last_error = None
             self.warnings = []
-            self.scheduled_end_at = None
-            self.scheduled_end_epoch = None
             wait_for_audio()
             cleanup_stale_graph()
 
@@ -687,7 +729,9 @@ class Recorder:
 
     def stop(self) -> dict[str, Any]:
         with self.lock:
+            self._clear_schedule()
             if self.ffmpeg is None or self.ffmpeg.poll() is not None:
+                self._persist_current_state()
                 return self.status()
             self.watcher_stop.set()
             self._stop_ffmpeg()
@@ -708,10 +752,7 @@ class Recorder:
     def finalize_meeting(self, reason: str = "manual") -> dict[str, Any]:
         """End the generic browser participant and finalize any active recording."""
         with self.lock:
-            self.scheduled_start_at = None
-            self.scheduled_start_epoch = None
-            self.scheduled_end_at = None
-            self.scheduled_end_epoch = None
+            self._clear_schedule()
 
             browser_result = terminate_chrome()
             if browser_result["found"]:
@@ -740,7 +781,7 @@ RECORDER = Recorder()
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "MeetingRecorder/0.7"
+    server_version = "MeetingRecorder/0.8"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         log(fmt % args)
@@ -795,7 +836,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self) -> None:
         try:
-            if self.path == "/meeting/start-time":
+            if self.path == "/recording/schedule":
+                body = self._read_json()
+                start_value = str(body.get("scheduled_start_at") or "").strip() or None
+                end_value = str(body.get("scheduled_end_at") or "").strip() or None
+                self._json(200, RECORDER.set_schedule(start_value, end_value))
+            elif self.path == "/meeting/start-time":
                 body = self._read_json()
                 value = str(body.get("scheduled_start_at", "")).strip()
                 if not value:
@@ -816,7 +862,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:
         try:
-            if self.path == "/meeting/start-time":
+            if self.path == "/recording/schedule":
+                self._json(200, RECORDER.cancel_schedule())
+            elif self.path == "/meeting/start-time":
                 self._json(200, RECORDER.cancel_start_time())
             elif self.path == "/meeting/end-time":
                 self._json(200, RECORDER.cancel_end_time())
