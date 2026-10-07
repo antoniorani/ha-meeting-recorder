@@ -197,6 +197,7 @@
   let lastRecording = null;
   let lastSavedSchedule = null;
   let scheduleDirty = false;
+  let scheduleError = null;
   let scheduleWrites = 0;
   let scheduleWrite = Promise.resolve();
   let busy = false;
@@ -298,6 +299,7 @@
 
     if (lastRecording !== null && lastRecording !== recording) {
       scheduleDirty = false;
+      scheduleError = null;
     }
     lastRecording = recording;
     lastSavedSchedule = serverScheduleSignature(status);
@@ -334,7 +336,9 @@
     }
 
     const warnings = Array.isArray(status?.warnings) ? status.warnings : [];
-    if (status?.last_error) {
+    if (scheduleError) {
+      setMessage(scheduleError);
+    } else if (status?.last_error) {
       setMessage(status.last_error);
     } else if (warnings.includes("virtual_microphone_not_available_at_start")) {
       setMessage(
@@ -364,8 +368,10 @@
     let snapshot;
     try {
       snapshot = readSchedule();
+      scheduleError = null;
     } catch (error) {
-      setMessage(error.message);
+      scheduleError = error.message;
+      setMessage(scheduleError);
       return;
     }
 
@@ -391,7 +397,8 @@
         render(status);
       })
       .catch((error) => {
-        setMessage(error.message);
+        scheduleError = error.message;
+        setMessage(scheduleError);
       })
       .finally(() => {
         scheduleWrites -= 1;
