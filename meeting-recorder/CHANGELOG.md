@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.0
+
+- Add scheduled recording start from the existing Ingress date/time control.
+- Reuse the scheduler control contextually: **Programar inicio** while idle and **Programar fin** while recording.
+- Add `PUT/DELETE /meeting/start-time` to set or cancel a scheduled recording start.
+- Persist a future scheduled start in app-private runtime state and restore it across normal app restarts.
+- Cancel a pending scheduled start when recording is started manually or the meeting is finalized.
+- Keep transcription outside Meeting Recorder; this release remains recording-only.
+
+
 ## 0.6.0
 
 - Remove Whisper/Wyoming and all transcription responsibilities from Meeting Recorder.
