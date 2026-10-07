@@ -1,5 +1,5 @@
 name: "Meeting Recorder"
-version: "0.8.2"
+version: "1.0.0"
 slug: "meeting_recorder"
 description: "Persistent meeting browser with robust audio-only recording"
 url: "https://github.com/antoniorani/ha-meeting-recorder"
@@ -8,7 +8,7 @@ arch:
 startup: application
 boot: manual
 init: false
-stage: experimental
+stage: stable
 apparmor: false
 privileged:
   - SYS_ADMIN
