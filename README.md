@@ -8,13 +8,14 @@ Experimental Home Assistant OS app for a persistent remote browser session that:
 - records **audio only**;
 - starts and stops audio recording manually with a single Play/Stop control;
 - supports an editable scheduled recording window with independent start and end times;
+- removes raw audio segments after 14 days and complete recording folders after 60 days;
 - persists the Google Chrome profile across app restarts and updates.
 
 ## Current status
 
 **Recording-only architecture.**
 
-The persistent browser, Ingress, audio/video forwarding, audio-only recording, generic meeting finalization and Chrome-profile persistence have been validated on the target HAOS host. The simplified 0.8.1 recording controls and auto-saving start/end schedule still need target-host runtime validation.
+The persistent browser, Ingress, audio/video forwarding, audio-only recording, generic meeting finalization and Chrome-profile persistence have been validated on the target HAOS host. The 0.8.2 auto-saving controls and retention policy still need target-host runtime validation.
 
 Transcription is deliberately **outside this app**. Meeting Recorder's output contract is a finalized `audio.opus` in the session directory. Downstream transcription or processing can consume that file independently.
 
