@@ -290,7 +290,8 @@
     startTimeInput.disabled = busy || recording;
     endTimeInput.disabled = busy;
     saveButton.disabled = busy || !scheduleDirty;
-    clearButton.disabled = busy || (!scheduledStart && !scheduledEnd);
+    clearButton.disabled =
+      busy || (!scheduleDirty && !scheduledStart && !scheduledEnd);
 
     if (recording) {
       if (status.started_at) {
