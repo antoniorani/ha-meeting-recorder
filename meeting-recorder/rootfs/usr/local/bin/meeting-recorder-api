@@ -422,6 +422,7 @@ class Recorder:
             self.scheduled_start_epoch = start[1] if start else None
             self.scheduled_end_at = end[0] if end else None
             self.scheduled_end_epoch = end[1] if end else None
+            self.last_error = None
             self._persist_current_state()
             log(
                 "Recording schedule updated "
@@ -432,6 +433,7 @@ class Recorder:
     def cancel_schedule(self) -> dict[str, Any]:
         with self.lock:
             self._clear_schedule()
+            self.last_error = None
             self._persist_current_state()
             log("Recording schedule cleared.")
             return self.status()
