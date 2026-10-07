@@ -37,6 +37,68 @@ jobs:
           bash -n meeting-recorder/rootfs/usr/local/bin/ha-meeting-recorder-entrypoint
           python -m py_compile meeting-recorder/rootfs/usr/local/bin/meeting-recorder-api
 
+      - name: Validate recording retention policy
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timedelta
+          from pathlib import Path
+          import runpy
+          import tempfile
+
+          namespace = runpy.run_path(
+              "meeting-recorder/rootfs/usr/local/bin/meeting-recorder-api",
+              run_name="meeting_recorder_retention_test",
+          )
+          cleanup = namespace["cleanup_recordings"]
+          if namespace["SEGMENT_RETENTION_DAYS"] != 14:
+              raise SystemExit("Segment retention must be 14 days")
+          if namespace["RECORDING_RETENTION_DAYS"] != 60:
+              raise SystemExit("Recording retention must be 60 days")
+
+          now = datetime.now().astimezone()
+
+          def make_session(root: Path, days_old: int, session_id: str) -> Path:
+              stamp = (now - timedelta(days=days_old)).strftime("%Y-%m-%d_%H%M%S")
+              session = root / f"{stamp}_{session_id}"
+              (session / "segments").mkdir(parents=True)
+              (session / "segments" / "segment_00000.ogg").write_bytes(b"segment")
+              (session / "audio.opus").write_bytes(b"audio")
+              return session
+
+          with tempfile.TemporaryDirectory() as tmp:
+              root = Path(tmp)
+              recent = make_session(root, 5, "11111111")
+              segment_expired = make_session(root, 15, "22222222")
+              recording_expired = make_session(root, 61, "33333333")
+              active = make_session(root, 61, "44444444")
+              unrelated = root / "do-not-touch"
+              unrelated.mkdir()
+              (unrelated / "segments").mkdir()
+
+              result = cleanup(root, active_session=active, now=now.timestamp())
+
+              if not (recent / "segments").is_dir():
+                  raise SystemExit("Recent segments were deleted too early")
+              if (segment_expired / "segments").exists():
+                  raise SystemExit("15-day-old segments were not deleted")
+              if not (segment_expired / "audio.opus").is_file():
+                  raise SystemExit("Final audio was deleted at the 14-day threshold")
+              if recording_expired.exists():
+                  raise SystemExit("61-day-old recording directory was not deleted")
+              if not (active / "segments").is_dir():
+                  raise SystemExit("Active recording was modified by retention")
+              if not (unrelated / "segments").is_dir():
+                  raise SystemExit("Unrelated directory was modified by retention")
+              if result != {"segments": 1, "sessions": 1}:
+                  raise SystemExit(f"Unexpected retention result: {result}")
+
+              second = cleanup(root, active_session=active, now=now.timestamp())
+              if second != {"segments": 0, "sessions": 0}:
+                  raise SystemExit(f"Retention cleanup is not idempotent: {second}")
+
+          print("Recording retention policy: OK")
+          PY
+
       - name: Validate injected JavaScript
         run: node --check meeting-recorder/rootfs/usr/local/share/meeting-recorder/controls.js
 
@@ -110,6 +172,12 @@ jobs:
           api = Path("meeting-recorder/rootfs/usr/local/bin/meeting-recorder-api").read_text(encoding="utf-8")
           required_api = (
               'def finalize_meeting(',
+              'def cleanup_recordings(',
+              'def cleanup_retention(',
+              'SEGMENT_RETENTION_DAYS = 14',
+              'RECORDING_RETENTION_DAYS = 60',
+              'RETENTION_SWEEP_SECONDS = 60 * 60',
+              'RECORDER.cleanup_retention()',
               'def set_schedule(',
               'def cancel_schedule(',
               'def set_start_time(',
