@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.1
+
+- Remove the explicit **Guardar** and **Limpiar** schedule buttons.
+- Save Inicio/Fin automatically when either native date/time field changes.
+- Clear an individual scheduled boundary by clearing that field directly.
+- Serialize schedule writes so rapid edits cannot be applied out of order.
+- Preserve unsaved/invalid local edits while status polling continues, and keep validation errors visible until corrected.
+- Keep the recording backend and atomic `/recording/schedule` contract unchanged.
+
+
 ## 0.8.0
 
 - Replace separate start/finalize buttons with a single icon-only Play/Stop recording control.
