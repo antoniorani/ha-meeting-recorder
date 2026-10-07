@@ -80,7 +80,7 @@
 
     #mr-schedule {
       display: flex;
-      align-items: end;
+      align-items: flex-end;
       gap: 8px;
       min-width: 0;
     }
@@ -223,6 +223,7 @@
 
   let startedAt = null;
   let lastStatus = null;
+  let lastRecording = null;
   let busy = false;
   let scheduleDirty = false;
 
@@ -278,6 +279,11 @@
     const scheduledStart = status?.scheduled_start_at || null;
     const scheduledEnd = status?.scheduled_end_at || null;
 
+    if (lastRecording !== null && lastRecording !== recording) {
+      scheduleDirty = false;
+    }
+    lastRecording = recording;
+
     root.classList.toggle("recording", recording);
     toggleButton.innerHTML = recording ? STOP_ICON : PLAY_ICON;
     toggleButton.setAttribute(
@@ -304,10 +310,12 @@
       stateLabel.textContent = status?.audio_ready ? "LISTO" : "AUDIO…";
     }
 
+    if (recording) {
+      startTimeInput.value = toDatetimeLocal(status?.started_at);
+    } else if (!scheduleDirty) {
+      startTimeInput.value = toDatetimeLocal(scheduledStart);
+    }
     if (!scheduleDirty) {
-      startTimeInput.value = toDatetimeLocal(
-        recording ? status?.started_at : scheduledStart
-      );
       endTimeInput.value = toDatetimeLocal(scheduledEnd);
     }
 
