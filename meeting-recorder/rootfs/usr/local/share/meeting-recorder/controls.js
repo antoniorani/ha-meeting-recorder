@@ -473,6 +473,12 @@
     } else {
       setMessage("");
     }
+
+    if (Number.isFinite(toolbarState.x) && Number.isFinite(toolbarState.y)) {
+      requestAnimationFrame(() => {
+        positionToolbar(toolbarState.x, toolbarState.y);
+      });
+    }
   }
 
   async function refresh() {
