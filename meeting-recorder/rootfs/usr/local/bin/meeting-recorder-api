@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import shutil
 import subprocess
 import threading
 import time
@@ -29,6 +30,9 @@ MIX_SINK = "meeting_recorder_mix"
 MIX_MONITOR = f"{MIX_SINK}.monitor"
 MIC_NAMES = ("SelkiesVirtualMic", "output.SelkiesVirtualMic")
 CHROME_MARKERS = ("/opt/google/chrome/chrome", "/opt/google/chrome/google-chrome")
+SEGMENT_RETENTION_DAYS = 14
+RECORDING_RETENTION_DAYS = 60
+RETENTION_SWEEP_SECONDS = 60 * 60
 
 
 def log(message: str) -> None:
@@ -224,6 +228,70 @@ def terminate_chrome(timeout: float = 6.0) -> dict[str, Any]:
     }
 
 
+def session_started_epoch(session_dir: Path) -> Optional[float]:
+    """Return the session start encoded in a generated directory name."""
+    try:
+        stamp, session_id = session_dir.name.rsplit("_", 1)
+        if len(session_id) != 8 or any(ch not in "0123456789abcdef" for ch in session_id):
+            return None
+        started = datetime.strptime(stamp, "%Y-%m-%d_%H%M%S").astimezone()
+        return started.timestamp()
+    except (ValueError, OSError):
+        return None
+
+
+def cleanup_recordings(
+    media_root: Path,
+    *,
+    active_session: Optional[Path] = None,
+    now: Optional[float] = None,
+) -> dict[str, int]:
+    """Apply the fixed recording retention policy to generated session folders."""
+    deleted_segments = 0
+    deleted_sessions = 0
+    now_epoch = time.time() if now is None else now
+    segment_cutoff = now_epoch - SEGMENT_RETENTION_DAYS * 86400
+    recording_cutoff = now_epoch - RECORDING_RETENTION_DAYS * 86400
+
+    try:
+        sessions = list(media_root.iterdir())
+    except FileNotFoundError:
+        return {"segments": 0, "sessions": 0}
+    except OSError as exc:
+        log(f"Retention scan failed: {exc}")
+        return {"segments": 0, "sessions": 0}
+
+    for session_dir in sessions:
+        if session_dir == active_session or session_dir.is_symlink() or not session_dir.is_dir():
+            continue
+
+        started_epoch = session_started_epoch(session_dir)
+        if started_epoch is None:
+            continue
+
+        try:
+            if started_epoch <= recording_cutoff:
+                shutil.rmtree(session_dir)
+                deleted_sessions += 1
+                log(f"Retention removed recording session: {session_dir}")
+                continue
+
+            segments = session_dir / "segments"
+            if (
+                started_epoch <= segment_cutoff
+                and segments.exists()
+                and not segments.is_symlink()
+                and segments.is_dir()
+            ):
+                shutil.rmtree(segments)
+                deleted_segments += 1
+                log(f"Retention removed audio segments: {segments}")
+        except OSError as exc:
+            log(f"Retention cleanup failed for {session_dir}: {exc}")
+
+    return {"segments": deleted_segments, "sessions": deleted_sessions}
+
+
 def parse_scheduled_time(value: str, field_name: str) -> tuple[str, float]:
     """Validate an RFC3339 timestamp and return canonical UTC ISO + epoch."""
     try:
@@ -357,7 +425,32 @@ class Recorder:
         self.scheduled_end_at = None
         self.scheduled_end_epoch = None
 
+    def cleanup_retention(self) -> dict[str, int]:
+        with self.lock:
+            running = self.ffmpeg is not None and self.ffmpeg.poll() is None
+            active = self.session_dir if running else None
+            result = cleanup_recordings(MEDIA_ROOT, active_session=active)
+
+            state_changed = False
+            if not running and self.session_dir is not None and not self.session_dir.exists():
+                self.session_id = None
+                self.session_dir = None
+                self.started_at = None
+                state_changed = True
+
+            if self.last_completed is not None:
+                audio_path = str(self.last_completed.get("audio_path") or "").strip()
+                if audio_path and not Path(audio_path).exists():
+                    self.last_completed = None
+                    state_changed = True
+
+            if state_changed:
+                self._persist_current_state()
+
+            return result
+
     def _scheduler_loop(self) -> None:
+        next_retention_sweep = time.monotonic() + RETENTION_SWEEP_SECONDS
         while not self.scheduler_stop.wait(0.5):
             start_due = False
             end_due = False
@@ -371,6 +464,10 @@ class Recorder:
                     # Make the scheduled end one-shot before executing it.
                     self.scheduled_end_epoch = None
                     end_due = True
+
+            if time.monotonic() >= next_retention_sweep:
+                self.cleanup_retention()
+                next_retention_sweep = time.monotonic() + RETENTION_SWEEP_SECONDS
 
             if start_due and end_due:
                 with self.lock:
@@ -790,7 +887,7 @@ RECORDER = Recorder()
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "MeetingRecorder/0.8.1"
+    server_version = "MeetingRecorder/0.8.2"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         log(fmt % args)
@@ -888,6 +985,7 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
     STATE_DIR.mkdir(parents=True, exist_ok=True)
+    RECORDER.cleanup_retention()
     log(f"Control API listening on {HOST}:{PORT}.")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
 

@@ -12,7 +12,7 @@ The target HAOS host has already validated:
 - generic meeting/browser finalization;
 - persistent Google Chrome configuration across add-on restarts/updates.
 
-Version **0.6.0** deliberately removes transcription from this add-on. Version **0.8.1** keeps the simplified recorder UI and makes start/end scheduling auto-save directly from the native date/time fields; that interaction still needs runtime validation on the target HAOS host.
+Version **0.6.0** deliberately removes transcription from this add-on. Version **0.8.2** keeps the simplified auto-saving recorder UI and adds automatic 14/60-day recording retention; that interaction and retention policy still need runtime validation on the target HAOS host.
 
 ## Normal flow
 
@@ -55,6 +55,17 @@ audio.opus exists          -> recording is complete and validated
 ```
 
 To make that rule reliable, Meeting Recorder never writes directly to the final filename during assembly. It creates a temporary file in the same directory, validates its duration with ffprobe, then performs an atomic rename to `audio.opus`.
+
+## Recording retention
+
+Retention is automatic and intentionally fixed:
+
+- after **14 days from the recording start**, the session's `segments/` directory is removed;
+- after **60 days from the recording start**, the entire session directory is removed, including `audio.opus`, logs and any remaining auxiliary files.
+
+The age comes from the timestamp already encoded in Meeting Recorder's generated session directory name, not filesystem modification times. This keeps retention stable even after files inside a session are changed or removed.
+
+Cleanup runs once when the control API starts and then hourly using the existing scheduler thread. The currently active recording is always excluded. Only directories matching Meeting Recorder's generated session naming format are eligible; unrelated directories under `/media/meeting-recorder` are left untouched.
 
 The app still uses an internal state file at:
 

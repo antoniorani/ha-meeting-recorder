@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.2
+
+- Add automatic recording retention with no new service or dependency.
+- Remove per-session raw audio `segments/` after 14 days from recording start.
+- Remove the complete recording directory, including `audio.opus`, after 60 days from recording start.
+- Derive retention age from the immutable timestamp encoded in generated session directory names rather than mutable filesystem mtimes.
+- Run retention cleanup at API startup and hourly through the existing scheduler.
+- Never delete the active recording and ignore directories that do not match Meeting Recorder's generated session naming format.
+
+
 ## 0.8.1
 
 - Remove the explicit **Guardar** and **Limpiar** schedule buttons.
