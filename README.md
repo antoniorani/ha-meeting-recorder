@@ -1,12 +1,13 @@
 # HA Meeting Recorder
 
-Experimental Home Assistant OS app for a persistent remote browser session that:
+Home Assistant OS app for a persistent remote browser session that:
 
 - stays connected to a web meeting even when the Home Assistant UI is closed;
 - lets the user join any compatible meeting manually in Google Chrome;
 - forwards microphone and webcam to that persistent browser session;
 - records **audio only**;
 - starts and stops audio recording manually with a single Play/Stop control;
+- provides a movable, minimizable recorder toolbar whose layout preference is kept in the browser;
 - supports an editable scheduled recording window with independent start and end times;
 - removes raw audio segments after 14 days and complete recording folders after 60 days;
 - persists the Google Chrome profile across app restarts and updates.
@@ -15,7 +16,7 @@ Experimental Home Assistant OS app for a persistent remote browser session that:
 
 **Recording-only architecture.**
 
-The persistent browser, Ingress, audio/video forwarding, audio-only recording, generic meeting finalization and Chrome-profile persistence have been validated on the target HAOS host. The 0.8.2 auto-saving controls and retention policy still need target-host runtime validation.
+The app is now published with Home Assistant's **stable** lifecycle stage. The persistent browser, Ingress, audio/video forwarding, audio-only recording, generic meeting finalization and Chrome-profile persistence have been validated on the target HAOS host. New 1.0.0 toolbar interactions should still receive a target-host smoke test after upgrade.
 
 Transcription is deliberately **outside this app**. Meeting Recorder's output contract is a finalized `audio.opus` in the session directory. Downstream transcription or processing can consume that file independently.
 
@@ -39,7 +40,7 @@ docs/
 
 ## Security note
 
-The current prototype temporarily requests `SYS_ADMIN` and disables AppArmor so it can enlarge `/dev/shm` inside the container. This must be removed or replaced before the MVP is considered hardened.
+The current implementation temporarily requests `SYS_ADMIN` and disables AppArmor so it can enlarge `/dev/shm` inside the container. This remains a security hardening item and should be removed or replaced when a compatible `/dev/shm` strategy is available.
 
 The browser-facing UI is served through **Home Assistant Ingress**. Home Assistant handles authentication and HTTPS; Selkies listens only on its internal HTTP port and that port is not published on the HAOS host.
 

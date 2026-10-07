@@ -12,7 +12,7 @@ The target HAOS host has already validated:
 - generic meeting/browser finalization;
 - persistent Google Chrome configuration across add-on restarts/updates.
 
-Version **0.6.0** deliberately removes transcription from this add-on. Version **0.8.2** keeps the simplified auto-saving recorder UI and adds automatic 14/60-day recording retention; that interaction and retention policy still need runtime validation on the target HAOS host.
+Version **0.6.0** deliberately removes transcription from this app. Version **1.0.0** marks the Home Assistant lifecycle as stable and adds the native app icon plus a movable/minimizable recorder toolbar. The new toolbar interaction should still receive a target-host smoke test after upgrade.
 
 ## Normal flow
 
@@ -22,10 +22,11 @@ Version **0.6.0** deliberately removes transcription from this add-on. Version *
 4. Press the **Play** button to start recording immediately, or set **Inicio** and/or **Fin** to define a recording window.
 5. Each date/time field saves automatically when its value changes. Clearing a field with the selector's native clear action removes that scheduled boundary.
 6. Pending start/end times remain visible in their own fields. When recording is active, Play becomes **Stop**, Inicio shows the actual recording start and is read-only, and Fin remains editable.
-7. You can close Home Assistant; Chrome, scheduled actions and active recording continue in the server.
-8. Press **Stop** or let the scheduled end time fire to finalize the audio. Manual stop clears any remaining schedule.
-9. Stopping recording does not close Chrome. The generic `/meeting/stop` API remains available for explicit browser-participant finalization.
-10. Only after ffprobe validates the assembled audio is it published as `audio.opus`.
+7. Drag the toolbar from its grip to move it. Use `−` to minimize it; Play/Stop remains available while minimized, and `+` restores the full toolbar. Position and minimized state are remembered in the browser.
+8. You can close Home Assistant; Chrome, scheduled actions and active recording continue in the server.
+9. Press **Stop** or let the scheduled end time fire to finalize the audio. Manual stop clears any remaining schedule.
+10. Stopping recording does not close Chrome. The generic `/meeting/stop` API remains available for explicit browser-participant finalization.
+11. Only after ffprobe validates the assembled audio is it published as `audio.opus`.
 
 Meeting Recorder does not navigate to meetings, fill IDs/PINs or use Playwright.
 
