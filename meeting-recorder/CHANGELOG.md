@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.0
+
+- Replace separate start/finalize buttons with a single icon-only Play/Stop recording control.
+- Replace the contextual scheduler with independent **Inicio** and **Fin** date/time fields.
+- Add atomic `PUT/DELETE /recording/schedule` operations so both schedule boundaries can be changed together without invalid intermediate states.
+- Keep pending schedule values visible and editable; while recording, show the actual start time and keep the scheduled end editable.
+- Allow a recording end to be scheduled before recording starts.
+- Preserve a scheduled end when recording starts manually or automatically.
+- Make manual Stop finalize audio and clear all pending scheduling without closing the persistent Chrome session.
+- Make scheduled end stop/finalize recording; if no recording is active, clear the expired schedule without closing Chrome.
+- Restore valid future start/end schedules after normal app restarts.
+- Keep the existing generic meeting-finalization API for compatibility.
+- Keep transcription outside Meeting Recorder.
+
+
 ## 0.7.0
 
 - Add scheduled recording start from the existing Ingress date/time control.
