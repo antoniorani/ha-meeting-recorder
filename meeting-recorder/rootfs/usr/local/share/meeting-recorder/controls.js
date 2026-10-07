@@ -115,7 +115,7 @@
     <button id="mr-finish" type="button">Finalizar reunión y grabación</button>
     <input id="mr-schedule-time" type="datetime-local" step="60" aria-label="Fecha y hora programada">
     <button id="mr-schedule" type="button">Programar inicio</button>
-    <button id="mr-cancel-schedule" type="button" disabled>Cancelar fin</button>
+    <button id="mr-cancel-schedule" type="button" disabled>Cancelar inicio</button>
     <span id="mr-scheduled"></span>
     <span id="mr-msg" aria-live="polite"></span>
   `;
@@ -188,6 +188,7 @@
     finishButton.disabled = busy || (!recording && !browserRunning);
     scheduleTimeInput.disabled = busy;
     scheduleButton.textContent = recording ? "Programar fin" : "Programar inicio";
+    cancelScheduleButton.textContent = recording ? "Cancelar fin" : "Cancelar inicio";
     scheduleButton.disabled = busy || !scheduleTimeInput.value;
     cancelScheduleButton.disabled = busy || !scheduled;
 
