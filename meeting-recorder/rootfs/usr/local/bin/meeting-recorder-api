@@ -372,6 +372,13 @@ class Recorder:
                     self.scheduled_end_epoch = None
                     end_due = True
 
+            if start_due and end_due:
+                with self.lock:
+                    self._clear_schedule()
+                    self._persist_current_state()
+                log("Scheduled recording window already elapsed; schedule cleared.")
+                continue
+
             if start_due:
                 log("Scheduled start time reached; starting recording.")
                 try:
