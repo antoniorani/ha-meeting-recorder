@@ -12,16 +12,16 @@ The target HAOS host has already validated:
 - generic meeting/browser finalization;
 - persistent Google Chrome configuration across add-on restarts/updates.
 
-Version **0.6.0** deliberately removes transcription from this add-on. Version **0.8.0** simplifies the recorder UI and treats start/end scheduling as an editable recording window; that 0.8.0 interaction still needs runtime validation on the target HAOS host.
+Version **0.6.0** deliberately removes transcription from this add-on. Version **0.8.1** keeps the simplified recorder UI and makes start/end scheduling auto-save directly from the native date/time fields; that interaction still needs runtime validation on the target HAOS host.
 
 ## Normal flow
 
 1. Start Meeting Recorder and open its Web UI.
 2. Use the persistent remote Google Chrome manually.
 3. Navigate to Jitsi, Meet, Teams, Webex or another compatible web meeting and join it yourself.
-4. Press the **Play** button to start recording immediately, or set **Inicio** and/or **Fin** and press **Guardar** to define a recording window.
-5. Pending start/end times remain visible in their own fields. Editing either field and saving replaces that boundary of the recording window.
-6. When recording is active, the Play button becomes **Stop**. The start field shows the actual recording start and is read-only; the scheduled end remains editable.
+4. Press the **Play** button to start recording immediately, or set **Inicio** and/or **Fin** to define a recording window.
+5. Each date/time field saves automatically when its value changes. Clearing a field with the selector's native clear action removes that scheduled boundary.
+6. Pending start/end times remain visible in their own fields. When recording is active, Play becomes **Stop**, Inicio shows the actual recording start and is read-only, and Fin remains editable.
 7. You can close Home Assistant; Chrome, scheduled actions and active recording continue in the server.
 8. Press **Stop** or let the scheduled end time fire to finalize the audio. Manual stop clears any remaining schedule.
 9. Stopping recording does not close Chrome. The generic `/meeting/stop` API remains available for explicit browser-participant finalization.

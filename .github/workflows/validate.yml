@@ -128,9 +128,13 @@ jobs:
               raise SystemExit("Missing finalization/scheduler API pieces: " + ", ".join(missing_api))
 
           controls = Path("meeting-recorder/rootfs/usr/local/share/meeting-recorder/controls.js").read_text(encoding="utf-8")
-          for required in ("PLAY_ICON", "STOP_ICON", "Inicio", "Fin", "Guardar", "Limpiar", "recording/schedule", "recording/stop"):
+          for required in ("PLAY_ICON", "STOP_ICON", "Inicio", "Fin", "recording/schedule", "recording/stop", 'addEventListener("change", syncSchedule)'):
               if required not in controls:
-                  raise SystemExit(f"Missing simplified recorder control: {required}")
+                  raise SystemExit(f"Missing auto-save recorder control: {required}")
+
+          for forbidden in ('id="mr-save"', 'id="mr-clear"', ">Guardar<", ">Limpiar<"):
+              if forbidden in controls:
+                  raise SystemExit(f"Obsolete schedule button still present: {forbidden}")
 
           for required in (
               'CHROME_PROFILE_ROOT="/data/chrome-profile"',

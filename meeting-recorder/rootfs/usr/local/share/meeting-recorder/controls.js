@@ -112,25 +112,6 @@
       opacity: 1;
     }
 
-    #mr-save,
-    #mr-clear {
-      min-height: 34px;
-      border: 0;
-      border-radius: 9px;
-      padding: 8px 10px;
-      cursor: pointer;
-    }
-
-    #mr-save {
-      background: #ded6ff;
-      color: #111;
-    }
-
-    #mr-clear {
-      background: #3b3b42;
-      color: #fff;
-    }
-
     #mr-control button:disabled,
     #mr-control input:disabled {
       cursor: default;
@@ -161,8 +142,7 @@
         order: 3;
         width: 100%;
         display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto;
-        align-items: end;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       }
 
       .mr-field input {
@@ -179,12 +159,7 @@
 
     @media (max-width: 560px) {
       #mr-schedule {
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      }
-
-      #mr-save,
-      #mr-clear {
-        width: 100%;
+        grid-template-columns: minmax(0, 1fr);
       }
     }
   `;
@@ -206,8 +181,6 @@
         <span>Fin</span>
         <input id="mr-end-time" type="datetime-local" step="60" aria-label="Fin programado">
       </label>
-      <button id="mr-save" type="button" disabled>Guardar</button>
-      <button id="mr-clear" type="button" disabled>Limpiar</button>
     </div>
     <span id="mr-msg" aria-live="polite"></span>
   `;
@@ -217,15 +190,15 @@
   const stateLabel = root.querySelector("#mr-state");
   const startTimeInput = root.querySelector("#mr-start-time");
   const endTimeInput = root.querySelector("#mr-end-time");
-  const saveButton = root.querySelector("#mr-save");
-  const clearButton = root.querySelector("#mr-clear");
   const message = root.querySelector("#mr-msg");
 
   let startedAt = null;
   let lastStatus = null;
   let lastRecording = null;
-  let busy = false;
   let scheduleDirty = false;
+  let scheduleError = null;
+  let scheduleWrite = Promise.resolve();
+  let busy = false;
 
   const api = (path) => new URL(path, apiBase);
 
@@ -273,6 +246,38 @@
     return date;
   }
 
+  function inputScheduleSignature(recording = Boolean(lastStatus?.recording)) {
+    return [
+      recording ? "" : startTimeInput.value,
+      endTimeInput.value,
+    ].join("|");
+  }
+
+  function readSchedule() {
+    const recording = Boolean(lastStatus?.recording);
+    const start = recording ? null : parseInput(startTimeInput, "Inicio");
+    const end = parseInput(endTimeInput, "Fin");
+    const now = Date.now();
+
+    if (start && start.getTime() <= now + 1000) {
+      throw new Error("El inicio debe estar en el futuro");
+    }
+    if (end && end.getTime() <= now + 1000) {
+      throw new Error("El fin debe estar en el futuro");
+    }
+    if (start && end && start.getTime() >= end.getTime()) {
+      throw new Error("El fin debe ser posterior al inicio");
+    }
+
+    return {
+      inputSignature: inputScheduleSignature(recording),
+      body: {
+        scheduled_start_at: start ? start.toISOString() : null,
+        scheduled_end_at: end ? end.toISOString() : null,
+      },
+    };
+  }
+
   function render(status) {
     lastStatus = status;
     const recording = Boolean(status?.recording);
@@ -281,6 +286,7 @@
 
     if (lastRecording !== null && lastRecording !== recording) {
       scheduleDirty = false;
+      scheduleError = null;
     }
     lastRecording = recording;
 
@@ -295,9 +301,6 @@
 
     startTimeInput.disabled = busy || recording;
     endTimeInput.disabled = busy;
-    saveButton.disabled = busy || !scheduleDirty;
-    clearButton.disabled =
-      busy || (!scheduleDirty && !scheduledStart && !scheduledEnd);
 
     if (recording) {
       if (status.started_at) {
@@ -305,22 +308,23 @@
         startedAt = Number.isFinite(parsed) ? parsed : startedAt;
       }
       stateLabel.textContent = elapsedText();
+      startTimeInput.value = toDatetimeLocal(status?.started_at);
     } else {
       startedAt = null;
       stateLabel.textContent = status?.audio_ready ? "LISTO" : "AUDIO…";
+      if (!scheduleDirty) {
+        startTimeInput.value = toDatetimeLocal(scheduledStart);
+      }
     }
 
-    if (recording) {
-      startTimeInput.value = toDatetimeLocal(status?.started_at);
-    } else if (!scheduleDirty) {
-      startTimeInput.value = toDatetimeLocal(scheduledStart);
-    }
     if (!scheduleDirty) {
       endTimeInput.value = toDatetimeLocal(scheduledEnd);
     }
 
     const warnings = Array.isArray(status?.warnings) ? status.warnings : [];
-    if (status?.last_error) {
+    if (scheduleError) {
+      setMessage(scheduleError);
+    } else if (status?.last_error) {
       setMessage(status.last_error);
     } else if (warnings.includes("virtual_microphone_not_available_at_start")) {
       setMessage(
@@ -341,18 +345,51 @@
       stateLabel.textContent = "API…";
       setMessage(error.message);
       toggleButton.disabled = true;
-      saveButton.disabled = true;
-      clearButton.disabled = true;
     }
+  }
+
+  function syncSchedule() {
+    scheduleDirty = true;
+
+    let snapshot;
+    try {
+      snapshot = readSchedule();
+      scheduleError = null;
+    } catch (error) {
+      scheduleError = error.message;
+      setMessage(scheduleError);
+      return;
+    }
+
+    scheduleWrite = scheduleWrite
+      .catch(() => {})
+      .then(async () => {
+        const status = await request("recording/schedule", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(snapshot.body),
+        });
+        scheduleError = null;
+        if (inputScheduleSignature() === snapshot.inputSignature) {
+          scheduleDirty = false;
+        }
+        render(status);
+      })
+      .catch((error) => {
+        scheduleError = error.message;
+        setMessage(scheduleError);
+      });
   }
 
   async function toggleRecording() {
     if (busy || !lastStatus) return;
     const recording = Boolean(lastStatus.recording);
+
     busy = true;
     setMessage("");
     render(lastStatus);
     try {
+      await scheduleWrite.catch(() => {});
       const status = await request(
         recording ? "recording/stop" : "recording/start",
         { method: "POST" }
@@ -367,73 +404,15 @@
     }
   }
 
-  async function saveSchedule() {
-    if (busy) return;
-
-    try {
-      const recording = Boolean(lastStatus?.recording);
-      const start = recording ? null : parseInput(startTimeInput, "Inicio");
-      const end = parseInput(endTimeInput, "Fin");
-      const now = Date.now();
-
-      if (start && start.getTime() <= now + 1000) {
-        throw new Error("El inicio debe estar en el futuro");
-      }
-      if (end && end.getTime() <= now + 1000) {
-        throw new Error("El fin debe estar en el futuro");
-      }
-      if (start && end && start.getTime() >= end.getTime()) {
-        throw new Error("El fin debe ser posterior al inicio");
-      }
-
-      busy = true;
-      setMessage("");
-      render(lastStatus);
-      const status = await request("recording/schedule", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          scheduled_start_at: start ? start.toISOString() : null,
-          scheduled_end_at: end ? end.toISOString() : null,
-        }),
-      });
-      scheduleDirty = false;
-      render(status);
-    } catch (error) {
-      setMessage(error.message);
-    } finally {
-      busy = false;
-      await refresh();
-    }
-  }
-
-  async function clearSchedule() {
-    if (busy) return;
-    busy = true;
-    setMessage("");
-    render(lastStatus);
-    try {
-      const status = await request("recording/schedule", { method: "DELETE" });
-      scheduleDirty = false;
-      render(status);
-    } catch (error) {
-      setMessage(error.message);
-    } finally {
-      busy = false;
-      await refresh();
-    }
-  }
-
   function markScheduleDirty() {
     scheduleDirty = true;
-    saveButton.disabled = busy;
   }
 
   toggleButton.addEventListener("click", toggleRecording);
   startTimeInput.addEventListener("input", markScheduleDirty);
   endTimeInput.addEventListener("input", markScheduleDirty);
-  saveButton.addEventListener("click", saveSchedule);
-  clearButton.addEventListener("click", clearSchedule);
+  startTimeInput.addEventListener("change", syncSchedule);
+  endTimeInput.addEventListener("change", syncSchedule);
 
   setInterval(() => {
     if (lastStatus?.recording) {
