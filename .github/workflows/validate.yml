@@ -110,9 +110,12 @@ jobs:
           api = Path("meeting-recorder/rootfs/usr/local/bin/meeting-recorder-api").read_text(encoding="utf-8")
           required_api = (
               'def finalize_meeting(',
+              'def set_start_time(',
+              'def cancel_start_time(',
               'def set_end_time(',
               'def cancel_end_time(',
               '"/meeting/stop"',
+              '"/meeting/start-time"',
               '"/meeting/end-time"',
               'CHROME_MARKERS',
           )
@@ -121,7 +124,7 @@ jobs:
               raise SystemExit("Missing finalization/scheduler API pieces: " + ", ".join(missing_api))
 
           controls = Path("meeting-recorder/rootfs/usr/local/share/meeting-recorder/controls.js").read_text(encoding="utf-8")
-          for required in ("Finalizar reunión y grabación", "Programar fin", "meeting/end-time", "meeting/stop"):
+          for required in ("Finalizar reunión y grabación", "Programar inicio", "Programar fin", "meeting/start-time", "meeting/end-time", "meeting/stop"):
               if required not in controls:
                   raise SystemExit(f"Missing UI finalization control: {required}")
 

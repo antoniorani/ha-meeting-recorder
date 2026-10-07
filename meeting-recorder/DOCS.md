@@ -8,19 +8,20 @@ The target HAOS host has already validated:
 - Home Assistant Ingress;
 - remote audio, microphone and webcam;
 - audio-only recording containing remote audio + forwarded microphone;
+- manual recording start;
 - manual and scheduled meeting finalization;
 - persistent Google Chrome configuration across add-on restarts/updates.
 
-Version **0.6.0** deliberately removes transcription from this add-on.
+Version **0.6.0** deliberately removes transcription from this add-on. Scheduled recording start is implemented in **0.7.0** and should still be runtime-validated on the target HAOS host.
 
 ## Normal flow
 
 1. Start Meeting Recorder and open its Web UI.
 2. Use the persistent remote Google Chrome manually.
 3. Navigate to Jitsi, Meet, Teams, Webex or another compatible web meeting and join it yourself.
-4. Press **Iniciar grabación** when you want audio capture to start.
-5. Optionally configure a scheduled end time.
-6. You can close Home Assistant; Chrome and the recording continue in the server.
+4. Start audio immediately with **Iniciar grabación**, or choose a future date/time and press **Programar inicio**.
+5. Once recording is active, the same date/time control switches to **Programar fin** so you can optionally schedule finalization.
+6. You can close Home Assistant; Chrome, scheduled actions and active recording continue in the server.
 7. End manually with **Finalizar reunión y grabación**, or let the scheduled end time fire.
 8. Meeting Recorder closes the Chrome meeting participant, closes the active audio segment and assembles the final recording.
 9. Only after ffprobe validates the assembled audio is it published as `audio.opus`.
@@ -60,7 +61,7 @@ The app still uses an internal state file at:
 /data/meeting-recorder/state.json
 ```
 
-That file is only for Meeting Recorder's own runtime/recovery/UI state. External consumers must not depend on it.
+That file is only for Meeting Recorder's own runtime/recovery/UI state. A future scheduled recording start is restored from it after a normal app restart as long as the configured time is still in the future. External consumers must not depend on it.
 
 ## Transcription boundary
 
