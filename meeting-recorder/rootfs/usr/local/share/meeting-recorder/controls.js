@@ -10,6 +10,7 @@
   if (!script) return;
 
   const apiBase = new URL("api/", script.src);
+  const TOOLBAR_STATE_KEY = "meeting-recorder-toolbar-v1";
 
   const PLAY_ICON = `
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -46,6 +47,48 @@
     #mr-control input {
       font: inherit;
       touch-action: manipulation;
+    }
+
+    #mr-drag,
+    #mr-minimize {
+      width: 30px;
+      height: 34px;
+      display: inline-grid;
+      place-items: center;
+      flex: 0 0 30px;
+      border: 0;
+      border-radius: 8px;
+      padding: 0;
+      background: transparent;
+      color: #cfcfd5;
+      cursor: pointer;
+      line-height: 1;
+      user-select: none;
+    }
+
+    #mr-drag {
+      cursor: grab;
+      font-size: 20px;
+      touch-action: none;
+    }
+
+    #mr-control.dragging #mr-drag {
+      cursor: grabbing;
+    }
+
+    #mr-minimize {
+      font-size: 22px;
+    }
+
+    #mr-control.minimized {
+      gap: 6px;
+      padding: 6px 8px;
+    }
+
+    #mr-control.minimized #mr-state,
+    #mr-control.minimized #mr-schedule,
+    #mr-control.minimized #mr-msg {
+      display: none;
     }
 
     #mr-toggle {
@@ -134,7 +177,6 @@
       #mr-control {
         top: 8px;
         right: 8px;
-        left: 8px;
         flex-wrap: wrap;
       }
 
@@ -170,6 +212,7 @@
   root.setAttribute("role", "region");
   root.setAttribute("aria-label", "Controles de Meeting Recorder");
   root.innerHTML = `
+    <button id="mr-drag" type="button" aria-label="Mover barra" title="Mover barra">⠿</button>
     <button id="mr-toggle" type="button" aria-label="Iniciar grabación" title="Iniciar grabación">${PLAY_ICON}</button>
     <span id="mr-state">Preparando…</span>
     <div id="mr-schedule">
@@ -183,14 +226,17 @@
       </label>
     </div>
     <span id="mr-msg" aria-live="polite"></span>
+    <button id="mr-minimize" type="button" aria-label="Minimizar barra" title="Minimizar barra" aria-expanded="true">−</button>
   `;
   document.body.appendChild(root);
 
+  const dragButton = root.querySelector("#mr-drag");
   const toggleButton = root.querySelector("#mr-toggle");
   const stateLabel = root.querySelector("#mr-state");
   const startTimeInput = root.querySelector("#mr-start-time");
   const endTimeInput = root.querySelector("#mr-end-time");
   const message = root.querySelector("#mr-msg");
+  const minimizeButton = root.querySelector("#mr-minimize");
 
   let startedAt = null;
   let lastStatus = null;
@@ -199,8 +245,99 @@
   let scheduleError = null;
   let scheduleWrite = Promise.resolve();
   let busy = false;
+  let dragState = null;
+  let toolbarState = loadToolbarState();
 
   const api = (path) => new URL(path, apiBase);
+
+  function loadToolbarState() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(TOOLBAR_STATE_KEY) || "null");
+      return {
+        x: Number.isFinite(saved?.x) ? saved.x : null,
+        y: Number.isFinite(saved?.y) ? saved.y : null,
+        minimized: Boolean(saved?.minimized),
+      };
+    } catch {
+      return { x: null, y: null, minimized: false };
+    }
+  }
+
+  function saveToolbarState() {
+    try {
+      localStorage.setItem(TOOLBAR_STATE_KEY, JSON.stringify(toolbarState));
+    } catch {
+      // The toolbar remains functional when storage is unavailable.
+    }
+  }
+
+  function positionToolbar(x, y, persist = false) {
+    const margin = 8;
+    const maxX = Math.max(margin, window.innerWidth - root.offsetWidth - margin);
+    const maxY = Math.max(margin, window.innerHeight - root.offsetHeight - margin);
+    const nextX = Math.min(Math.max(x, margin), maxX);
+    const nextY = Math.min(Math.max(y, margin), maxY);
+
+    root.style.left = `${nextX}px`;
+    root.style.top = `${nextY}px`;
+    root.style.right = "auto";
+    toolbarState.x = nextX;
+    toolbarState.y = nextY;
+    if (persist) saveToolbarState();
+  }
+
+  function setMinimized(minimized, persist = true) {
+    toolbarState.minimized = Boolean(minimized);
+    root.classList.toggle("minimized", toolbarState.minimized);
+
+    const label = toolbarState.minimized ? "Mostrar barra" : "Minimizar barra";
+    minimizeButton.textContent = toolbarState.minimized ? "+" : "−";
+    minimizeButton.setAttribute("aria-label", label);
+    minimizeButton.title = label;
+    minimizeButton.setAttribute(
+      "aria-expanded",
+      toolbarState.minimized ? "false" : "true"
+    );
+
+    requestAnimationFrame(() => {
+      if (Number.isFinite(toolbarState.x) && Number.isFinite(toolbarState.y)) {
+        positionToolbar(toolbarState.x, toolbarState.y, persist);
+      } else if (persist) {
+        saveToolbarState();
+      }
+    });
+  }
+
+  function startToolbarDrag(event) {
+    if (event.button !== 0) return;
+    const rect = root.getBoundingClientRect();
+    dragState = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    };
+    dragButton.setPointerCapture(event.pointerId);
+    root.classList.add("dragging");
+    event.preventDefault();
+  }
+
+  function moveToolbar(event) {
+    if (!dragState || event.pointerId !== dragState.pointerId) return;
+    positionToolbar(
+      event.clientX - dragState.offsetX,
+      event.clientY - dragState.offsetY
+    );
+  }
+
+  function stopToolbarDrag(event) {
+    if (!dragState || event.pointerId !== dragState.pointerId) return;
+    root.classList.remove("dragging");
+    if (dragButton.hasPointerCapture(event.pointerId)) {
+      dragButton.releasePointerCapture(event.pointerId);
+    }
+    dragState = null;
+    saveToolbarState();
+  }
 
   async function request(path, options = {}) {
     const response = await fetch(api(path), {
@@ -408,11 +545,31 @@
     scheduleDirty = true;
   }
 
+  dragButton.addEventListener("pointerdown", startToolbarDrag);
+  dragButton.addEventListener("pointermove", moveToolbar);
+  dragButton.addEventListener("pointerup", stopToolbarDrag);
+  dragButton.addEventListener("pointercancel", stopToolbarDrag);
+  minimizeButton.addEventListener("click", () => {
+    setMinimized(!toolbarState.minimized);
+  });
   toggleButton.addEventListener("click", toggleRecording);
   startTimeInput.addEventListener("input", markScheduleDirty);
   endTimeInput.addEventListener("input", markScheduleDirty);
   startTimeInput.addEventListener("change", syncSchedule);
   endTimeInput.addEventListener("change", syncSchedule);
+
+  window.addEventListener("resize", () => {
+    if (Number.isFinite(toolbarState.x) && Number.isFinite(toolbarState.y)) {
+      positionToolbar(toolbarState.x, toolbarState.y);
+    }
+  });
+
+  setMinimized(toolbarState.minimized, false);
+  requestAnimationFrame(() => {
+    if (Number.isFinite(toolbarState.x) && Number.isFinite(toolbarState.y)) {
+      positionToolbar(toolbarState.x, toolbarState.y);
+    }
+  });
 
   setInterval(() => {
     if (lastStatus?.recording) {
