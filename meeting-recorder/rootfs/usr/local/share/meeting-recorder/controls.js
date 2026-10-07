@@ -195,10 +195,8 @@
   let startedAt = null;
   let lastStatus = null;
   let lastRecording = null;
-  let lastSavedSchedule = null;
   let scheduleDirty = false;
   let scheduleError = null;
-  let scheduleWrites = 0;
   let scheduleWrite = Promise.resolve();
   let busy = false;
 
@@ -248,13 +246,6 @@
     return date;
   }
 
-  function serverScheduleSignature(status) {
-    return [
-      status?.scheduled_start_at || "",
-      status?.scheduled_end_at || "",
-    ].join("|");
-  }
-
   function inputScheduleSignature(recording = Boolean(lastStatus?.recording)) {
     return [
       recording ? "" : startTimeInput.value,
@@ -280,10 +271,6 @@
 
     return {
       inputSignature: inputScheduleSignature(recording),
-      serverSignature: [
-        start ? start.toISOString() : "",
-        end ? end.toISOString() : "",
-      ].join("|"),
       body: {
         scheduled_start_at: start ? start.toISOString() : null,
         scheduled_end_at: end ? end.toISOString() : null,
@@ -302,7 +289,6 @@
       scheduleError = null;
     }
     lastRecording = recording;
-    lastSavedSchedule = serverScheduleSignature(status);
 
     root.classList.toggle("recording", recording);
     toggleButton.innerHTML = recording ? STOP_ICON : PLAY_ICON;
@@ -375,13 +361,6 @@
       return;
     }
 
-    if (scheduleWrites === 0 && snapshot.serverSignature === lastSavedSchedule) {
-      scheduleDirty = false;
-      setMessage("");
-      return;
-    }
-
-    scheduleWrites += 1;
     scheduleWrite = scheduleWrite
       .catch(() => {})
       .then(async () => {
@@ -390,7 +369,6 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(snapshot.body),
         });
-        lastSavedSchedule = serverScheduleSignature(status);
         if (inputScheduleSignature() === snapshot.inputSignature) {
           scheduleDirty = false;
         }
@@ -399,9 +377,6 @@
       .catch((error) => {
         scheduleError = error.message;
         setMessage(scheduleError);
-      })
-      .finally(() => {
-        scheduleWrites -= 1;
       });
   }
 
