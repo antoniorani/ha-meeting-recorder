@@ -369,6 +369,7 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(snapshot.body),
         });
+        scheduleError = null;
         if (inputScheduleSignature() === snapshot.inputSignature) {
           scheduleDirty = false;
         }
