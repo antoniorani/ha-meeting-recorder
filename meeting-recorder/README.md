@@ -1,8 +1,8 @@
 # Meeting Recorder
 
-Experimental Home Assistant OS app.
+Home Assistant OS app.
 
-Current release `0.8.2` provides a persistent Selkies/Chrome meeting session on amd64 with compact Play/Stop controls, auto-saving scheduling, and automatic recording retention.
+Current release `1.0.0` is published as a stable Home Assistant app on amd64, with a persistent Selkies/Chrome session, auto-saving recording controls, automatic retention, and a movable/minimizable recorder toolbar.
 
 The UI is exposed through **Home Assistant Ingress**, so **Open Web UI** should keep the user inside Home Assistant rather than opening a direct Selkies port in a separate tab.
 
