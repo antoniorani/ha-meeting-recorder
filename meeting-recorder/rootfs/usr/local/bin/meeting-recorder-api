@@ -476,8 +476,6 @@ class Recorder:
 
             self.last_error = None
             self.warnings = []
-            self.scheduled_start_at = None
-            self.scheduled_start_epoch = None
             self.scheduled_end_at = None
             self.scheduled_end_epoch = None
             wait_for_audio()
@@ -561,6 +559,8 @@ class Recorder:
                         f"FFmpeg exited during startup with code {self.ffmpeg.returncode}; see {ffmpeg_log_path}"
                     )
 
+                self.scheduled_start_at = None
+                self.scheduled_start_epoch = None
                 self.started_at = iso_now()
                 self.started_monotonic = time.monotonic()
                 metadata = self._metadata("recording")
