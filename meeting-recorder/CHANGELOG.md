@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.0
+
+- Promote Meeting Recorder from Home Assistant's `experimental` lifecycle stage to `stable`.
+- Add the Home Assistant Supervisor app icon as `icon.png`.
+- Make the recorder toolbar draggable within the viewport using a dedicated grip.
+- Add a minimize/restore control while keeping Play/Stop available in the compact state.
+- Persist toolbar position and minimized state in browser-local storage.
+- Keep dragged positions clamped to the visible viewport, including after viewport resizing.
+- Keep the implementation dependency-free and preserve the existing recording/scheduling backend contracts.
+
+
 ## 0.8.2
 
 - Add automatic recording retention with no new service or dependency.
