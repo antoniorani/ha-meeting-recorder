@@ -18,11 +18,11 @@ Home Assistant OS app for a persistent remote browser session that:
 
 **Recording-only architecture.**
 
-The app is published with Home Assistant's **stable** lifecycle stage. Version **2.0.0** changes the finalized recording contract from Opus to MP3 and migrates retained legacy Opus recordings during startup; this new output/migration path should receive a target-host smoke test after upgrade.
+The app is published with Home Assistant's **stable** lifecycle stage. Version **2.0.1** keeps MP3 as the finalized recording contract and normalizes both new and already-created MP3 files to a simple CBR compatibility profile intended to behave reliably in Windows players as well as Home Assistant.
 
 Transcription is deliberately **outside this app**. Meeting Recorder's output contract is a finalized `audio.mp3` in the session directory. Downstream transcription or processing can consume that file independently.
 
-A final `audio.mp3` is published only after MP3 encoding and ffprobe validation, using an atomic rename. Legacy `audio.opus` files are converted with the same safety rule and are deleted only after a valid MP3 has been published. No per-recording JSON marker is required.
+A final `audio.mp3` is published only after MP3 encoding and validation, using an atomic rename. The output is stereo 48 kHz CBR MP3 without ID3v2 or Xing/Info headers. Existing MP3 files from 2.0.0 are normalized automatically on startup; failed rewrites preserve the original file. Legacy `audio.opus` files retain the same safe migration path. No per-recording JSON marker is required.
 
 The app currently supports **amd64 only**.
 

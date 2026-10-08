@@ -71,21 +71,40 @@ def run(
     )
 
 
-def probe_audio_duration(path: Path) -> float:
+def validate_mp3(path: Path) -> float:
+    """Validate the MP3 stream and the compatibility profile used by the app."""
     result = run(
         [
             "ffprobe",
             "-v", "error",
-            "-show_entries", "format=duration",
+            "-select_streams", "a:0",
+            "-show_entries", "stream=codec_name,sample_rate,channels:format=duration",
             "-of", "json",
             str(path),
         ],
         timeout=20,
     )
     data = json.loads(result.stdout or "{}")
+    streams = data.get("streams") or []
+    stream = streams[0] if streams else {}
     duration = float(data.get("format", {}).get("duration", 0) or 0)
+
+    if stream.get("codec_name") != "mp3":
+        raise RuntimeError(f"Audio file is not MP3: {path}")
+    if int(stream.get("sample_rate") or 0) != 48000:
+        raise RuntimeError(f"MP3 sample rate is not 48000 Hz: {path}")
+    if int(stream.get("channels") or 0) != 2:
+        raise RuntimeError(f"MP3 is not stereo: {path}")
     if duration <= 0:
-        raise RuntimeError(f"Audio file has no measurable duration: {path}")
+        raise RuntimeError(f"MP3 has no measurable duration: {path}")
+
+    with path.open("rb") as handle:
+        header = handle.read(512)
+    if header.startswith(b"ID3"):
+        raise RuntimeError(f"MP3 contains an ID3v2 header: {path}")
+    if b"Xing" in header or b"Info" in header:
+        raise RuntimeError(f"MP3 contains a Xing/Info header: {path}")
+
     return duration
 
 
@@ -113,8 +132,13 @@ def publish_mp3(
                 "-y",
                 *input_args,
                 "-vn",
+                "-map_metadata", "-1",
+                "-ac", "2",
+                "-ar", "48000",
                 "-c:a", "libmp3lame",
                 "-b:a", f"{bitrate_kbps}k",
+                "-id3v2_version", "0",
+                "-write_xing", "0",
                 "-f", "mp3",
                 str(temp_output),
             ],
@@ -124,7 +148,7 @@ def publish_mp3(
         if result.returncode != 0:
             raise RuntimeError(f"MP3 encoding failed: {(result.stderr or '').strip()}")
 
-        duration = probe_audio_duration(temp_output)
+        duration = validate_mp3(temp_output)
         temp_output.replace(output)
         return duration
     finally:
@@ -168,9 +192,8 @@ def migrate_legacy_recordings(
 
             if output.is_file():
                 try:
-                    probe_audio_duration(output)
+                    validate_mp3(output)
                 except Exception:
-                    output.unlink()
                     publish_mp3(
                         ["-i", str(source)],
                         output,
@@ -191,6 +214,54 @@ def migrate_legacy_recordings(
             log(f"Legacy audio migration failed for {source}: {exc}")
 
     return {"migrated": migrated, "failed": failed}
+
+
+def normalize_existing_mp3s(
+    media_root: Path,
+    *,
+    bitrate_kbps: int,
+) -> dict[str, int]:
+    """Rewrite MP3s created by older releases to the compatibility profile."""
+    normalized = 0
+    failed = 0
+
+    try:
+        sessions = list(media_root.iterdir())
+    except FileNotFoundError:
+        return {"normalized": 0, "failed": 0}
+    except OSError as exc:
+        log(f"MP3 compatibility scan failed: {exc}")
+        return {"normalized": 0, "failed": 1}
+
+    for session_dir in sessions:
+        if session_dir.is_symlink() or not session_dir.is_dir():
+            continue
+        if session_started_epoch(session_dir) is None:
+            continue
+
+        output = session_dir / FINAL_AUDIO_NAME
+        if output.is_symlink() or not output.is_file():
+            continue
+
+        try:
+            validate_mp3(output)
+            continue
+        except Exception:
+            pass
+
+        try:
+            publish_mp3(
+                ["-i", str(output)],
+                output,
+                bitrate_kbps=bitrate_kbps,
+            )
+            normalized += 1
+            log(f"Normalized MP3 for Windows compatibility: {output}")
+        except Exception as exc:
+            failed += 1
+            log(f"MP3 compatibility normalization failed for {output}: {exc}")
+
+    return {"normalized": normalized, "failed": failed}
 
 
 def reconcile_migrated_state(state_file: Path) -> bool:
@@ -1017,7 +1088,7 @@ RECORDER = Recorder()
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "MeetingRecorder/2.0.0"
+    server_version = "MeetingRecorder/2.0.1"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         log(fmt % args)
@@ -1130,6 +1201,17 @@ def main() -> None:
             "Legacy audio migration finished "
             f"(migrated={migration['migrated']}, failed={migration['failed']})."
         )
+
+    normalization = normalize_existing_mp3s(
+        MEDIA_ROOT,
+        bitrate_kbps=bitrate_kbps,
+    )
+    if normalization["normalized"] or normalization["failed"]:
+        log(
+            "MP3 compatibility normalization finished "
+            f"(normalized={normalization['normalized']}, failed={normalization['failed']})."
+        )
+
     if reconcile_migrated_state(STATE_FILE):
         log("Updated recorder state to the migrated MP3 path.")
 
