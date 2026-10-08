@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.0.0
+
+- Change the finalized recording contract from `audio.opus` to `audio.mp3`.
+- Keep resilient Ogg/Opus capture segments internally, then encode them once to MP3 at finalization.
+- Validate the temporary MP3 with ffprobe before atomically publishing `audio.mp3`.
+- Migrate legacy finalized `audio.opus` files to MP3 during startup.
+- Delete a legacy Opus file only after its MP3 replacement has been validated and published successfully.
+- Accept an already-valid `audio.mp3` during migration and remove only the redundant legacy Opus source.
+- Preserve a legacy Opus file when migration fails so a later restart can retry safely.
+- Require the runtime FFmpeg build to expose the `libmp3lame` encoder.
+- Keep the 14-day segment and 60-day recording retention policy unchanged.
+
+
 ## 1.0.0
 
 - Promote Meeting Recorder from Home Assistant's `experimental` lifecycle stage to `stable`.
