@@ -13,6 +13,7 @@ USER root
 
 RUN apt-get update && \
     apt-get install --no-install-recommends -y \
+      ffmpeg \
       nginx \
       pulseaudio-utils && \
     apt-get clean && \
