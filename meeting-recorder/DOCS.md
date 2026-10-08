@@ -12,7 +12,7 @@ The target HAOS host has already validated:
 - generic meeting/browser finalization;
 - persistent Google Chrome configuration across add-on restarts/updates.
 
-Version **0.6.0** deliberately removes transcription from this app. Version **1.0.0** marks the Home Assistant lifecycle as stable and adds the native app icon plus a movable/minimizable recorder toolbar. The new toolbar interaction should still receive a target-host smoke test after upgrade.
+Version **0.6.0** deliberately removes transcription from this app. Version **1.0.0** marks the Home Assistant lifecycle as stable. Version **2.0.0** changes the finalized recording contract from Opus to MP3 and performs a safe one-time migration of retained legacy Opus recordings at startup. The MP3 finalization/migration path should still receive a target-host smoke test after upgrade.
 
 ## Normal flow
 
@@ -26,7 +26,7 @@ Version **0.6.0** deliberately removes transcription from this app. Version **1.
 8. You can close Home Assistant; Chrome, scheduled actions and active recording continue in the server.
 9. Press **Stop** or let the scheduled end time fire to finalize the audio. Manual stop clears any remaining schedule.
 10. Stopping recording does not close Chrome. The generic `/meeting/stop` API remains available for explicit browser-participant finalization.
-11. Only after ffprobe validates the assembled audio is it published as `audio.opus`.
+11. Only after MP3 encoding and ffprobe validation succeed is the finalized recording published as `audio.mp3`.
 
 Meeting Recorder does not navigate to meetings, fill IDs/PINs or use Playwright.
 
@@ -45,24 +45,28 @@ Each recording gets a directory such as:
       segment_00001.ogg
       ...
     segments.txt
-    audio.opus
+    audio.mp3
 ```
 
 The rule for any downstream process is simple:
 
 ```text
-audio.opus does not exist  -> recording is incomplete/not finalized
-audio.opus exists          -> recording is complete and validated
+audio.mp3 does not exist  -> recording is incomplete/not finalized
+audio.mp3 exists          -> recording is complete and validated
 ```
 
-To make that rule reliable, Meeting Recorder never writes directly to the final filename during assembly. It creates a temporary file in the same directory, validates its duration with ffprobe, then performs an atomic rename to `audio.opus`.
+To make that rule reliable, Meeting Recorder never writes directly to the final filename. It encodes the Opus segments into a temporary MP3 in the same directory, validates its duration with ffprobe, then performs an atomic rename to `audio.mp3`.
+
+### Legacy Opus migration
+
+On startup, version 2.0.0 applies the existing retention policy first, so sessions already due for 60-day deletion are removed rather than needlessly transcoded. It then scans only remaining Meeting Recorder session directories. For each legacy finalized `audio.opus`, it creates and validates `audio.mp3` first, atomically publishes the MP3, and only then removes the Opus source. If conversion or validation fails, the original Opus file remains untouched so the migration can be retried on the next start. An already-valid `audio.mp3` is accepted and the redundant legacy Opus file is removed without re-encoding. If an invalid MP3 is present beside a valid legacy Opus source, the invalid target is replaced from that preserved source. If the internal runtime state still points to a migrated `audio.opus`, that path is atomically reconciled to `audio.mp3`; failure to rewrite that internal state is logged but does not prevent the app from starting.
 
 ## Recording retention
 
 Retention is automatic and intentionally fixed:
 
 - after **14 days from the recording start**, the session's `segments/` directory is removed;
-- after **60 days from the recording start**, the entire session directory is removed, including `audio.opus`, logs and any remaining auxiliary files.
+- after **60 days from the recording start**, the entire session directory is removed, including `audio.mp3`, logs and any remaining auxiliary files.
 
 The age comes from the timestamp already encoded in Meeting Recorder's generated session directory name, not filesystem modification times. This keeps retention stable even after files inside a session are changed or removed.
 
@@ -83,7 +87,7 @@ Transcription is outside Meeting Recorder.
 A separate service, automation or future add-on may watch:
 
 ```text
-/media/meeting-recorder/*/audio.opus
+/media/meeting-recorder/*/audio.mp3
 ```
 
 and process finalized recordings independently with Whisper or any other STT system.
@@ -124,7 +128,7 @@ remote meeting audio
                               v
                        meeting_recorder_mix
                               |
-client mic                    +--> meeting_recorder_mix.monitor --> FFmpeg --> Opus segments
+client mic                    +--> meeting_recorder_mix.monitor --> FFmpeg --> Opus segments --> MP3 finalization
    |
    v
 SelkiesVirtualMic ------------+
@@ -139,6 +143,8 @@ shm_size_mb: 2048
 segment_seconds: 300
 audio_bitrate_kbps: 64
 ```
+
+`audio_bitrate_kbps` remains the single audio bitrate setting: it is used for the resilient Opus capture segments and for final MP3 encoding, including legacy Opus migration.
 
 ## Privacy note about mute
 

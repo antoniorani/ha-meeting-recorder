@@ -62,7 +62,7 @@ jobs:
               session = root / f"{stamp}_{session_id}"
               (session / "segments").mkdir(parents=True)
               (session / "segments" / "segment_00000.ogg").write_bytes(b"segment")
-              (session / "audio.opus").write_bytes(b"audio")
+              (session / "audio.mp3").write_bytes(b"audio")
               return session
 
           with tempfile.TemporaryDirectory() as tmp:
@@ -81,8 +81,8 @@ jobs:
                   raise SystemExit("Recent segments were deleted too early")
               if (segment_expired / "segments").exists():
                   raise SystemExit("15-day-old segments were not deleted")
-              if not (segment_expired / "audio.opus").is_file():
-                  raise SystemExit("Final audio was deleted at the 14-day threshold")
+              if not (segment_expired / "audio.mp3").is_file():
+                  raise SystemExit("Final MP3 was deleted at the 14-day threshold")
               if recording_expired.exists():
                   raise SystemExit("61-day-old recording directory was not deleted")
               if not (active / "segments").is_dir():
@@ -97,6 +97,110 @@ jobs:
                   raise SystemExit(f"Retention cleanup is not idempotent: {second}")
 
           print("Recording retention policy: OK")
+          PY
+
+      - name: Validate legacy Opus migration
+        run: |
+          python - <<'PY'
+          from datetime import datetime
+          from pathlib import Path
+          import runpy
+          import subprocess
+          import tempfile
+
+          namespace = runpy.run_path(
+              "meeting-recorder/rootfs/usr/local/bin/meeting-recorder-api",
+              run_name="meeting_recorder_mp3_migration_test",
+          )
+          migrate = namespace["migrate_legacy_recordings"]
+          reconcile = namespace["reconcile_migrated_state"]
+          original_run = namespace["run"]
+          now = datetime.now().astimezone()
+
+          def session(root: Path, suffix: str) -> Path:
+              stamp = now.strftime("%Y-%m-%d_%H%M%S")
+              path = root / f"{stamp}_{suffix}"
+              path.mkdir()
+              return path
+
+          def fake_run(args, *, check=True, timeout=10, capture=True):
+              if args[0] == "ffprobe":
+                  target = Path(args[-1])
+                  if target.exists() and target.read_bytes() == b"broken":
+                      raise subprocess.CalledProcessError(1, args, "", "invalid mp3")
+                  return subprocess.CompletedProcess(
+                      args, 0, '{"format":{"duration":"42.0"}}', ""
+                  )
+              if args[0] == "ffmpeg":
+                  source = args[args.index("-i") + 1]
+                  if "33333333" in source:
+                      return subprocess.CompletedProcess(args, 1, "", "synthetic failure")
+                  Path(args[-1]).write_bytes(b"mp3")
+                  return subprocess.CompletedProcess(args, 0, "", "")
+              return original_run(
+                  args,
+                  check=check,
+                  timeout=timeout,
+                  capture=capture,
+              )
+
+          migrate.__globals__["run"] = fake_run
+
+          with tempfile.TemporaryDirectory() as tmp:
+              root = Path(tmp)
+
+              convert = session(root, "11111111")
+              (convert / "audio.opus").write_bytes(b"opus")
+
+              state_file = root / "state.json"
+              state_file.write_text(
+                  '{"state":"completed","audio_path":"' + str(convert / "audio.opus") + '"}',
+                  encoding="utf-8",
+              )
+
+              already_done = session(root, "22222222")
+              (already_done / "audio.opus").write_bytes(b"opus")
+              (already_done / "audio.mp3").write_bytes(b"mp3")
+
+              failed = session(root, "33333333")
+              (failed / "audio.opus").write_bytes(b"opus")
+
+              repair = session(root, "44444444")
+              (repair / "audio.opus").write_bytes(b"opus")
+              (repair / "audio.mp3").write_bytes(b"broken")
+
+              unrelated = root / "do-not-touch"
+              unrelated.mkdir()
+              (unrelated / "audio.opus").write_bytes(b"opus")
+
+              result = migrate(root, bitrate_kbps=64)
+              if result != {"migrated": 3, "failed": 1}:
+                  raise SystemExit(f"Unexpected migration result: {result}")
+
+              if (convert / "audio.opus").exists() or not (convert / "audio.mp3").is_file():
+                  raise SystemExit("Legacy Opus was not safely replaced by MP3")
+              if (already_done / "audio.opus").exists():
+                  raise SystemExit("Redundant Opus was not removed beside valid MP3")
+              if not (failed / "audio.opus").is_file() or (failed / "audio.mp3").exists():
+                  raise SystemExit("Failed migration did not preserve the Opus source")
+              if (repair / "audio.opus").exists() or (repair / "audio.mp3").read_bytes() != b"mp3":
+                  raise SystemExit("Invalid existing MP3 was not safely repaired")
+              if not (unrelated / "audio.opus").is_file():
+                  raise SystemExit("Migration modified an unrelated directory")
+
+              if not reconcile(state_file):
+                  raise SystemExit("Migrated state path was not updated")
+              state = state_file.read_text(encoding="utf-8")
+              if str(convert / "audio.mp3") not in state or "audio.opus" in state:
+                  raise SystemExit("State still points to legacy Opus after migration")
+              if reconcile(state_file):
+                  raise SystemExit("State reconciliation is not idempotent")
+
+              second = migrate(root, bitrate_kbps=64)
+              if second != {"migrated": 0, "failed": 1}:
+                  raise SystemExit(f"Migration is not idempotent: {second}")
+
+          print("Legacy Opus migration: OK")
           PY
 
       - name: Validate injected JavaScript
@@ -119,6 +223,9 @@ jobs:
 
           if config["arch"] != ["amd64"]:
               raise SystemExit("Current target must declare amd64 only")
+
+          if config["version"] != "2.0.0":
+              raise SystemExit("MP3 output contract must ship as version 2.0.0")
 
           if config.get("stage", "stable") != "stable":
               raise SystemExit("Meeting Recorder must be published with the stable lifecycle stage")
@@ -193,6 +300,12 @@ jobs:
               'RECORDING_RETENTION_DAYS = 60',
               'RETENTION_SWEEP_SECONDS = 60 * 60',
               'RECORDER.cleanup_retention()',
+              'FINAL_AUDIO_NAME = "audio.mp3"',
+              'LEGACY_AUDIO_NAME = "audio.opus"',
+              'def publish_mp3(',
+              'def migrate_legacy_recordings(',
+              'def reconcile_migrated_state(',
+              '"libmp3lame"',
               'def set_schedule(',
               'def cancel_schedule(',
               'def set_start_time(',
@@ -253,8 +366,19 @@ jobs:
           if "wyoming" in dockerfile.lower() or "meeting-recorder-transcribe" in dockerfile:
               raise SystemExit("Recording-only image must not contain Wyoming/transcription worker")
 
-          if 'temp_output.replace(output)' not in api or '".audio.opus.tmp"' not in api:
-              raise SystemExit("Final audio must be atomically published from a validated temporary file")
+          if "grep -q 'libmp3lame'" not in dockerfile:
+              raise SystemExit("Runtime image must verify the libmp3lame encoder")
 
-          print("Selkies, Chrome persistence and recording-only finalization policy: OK")
+          if 'temp_output.replace(output)' not in api or 'probe_audio_duration(temp_output)' not in api:
+              raise SystemExit("Final MP3 must be validated before atomic publication")
+
+          if 'source.unlink()' not in api:
+              raise SystemExit("Legacy Opus removal must happen only after MP3 publication")
+
+          retention_call = api.index("RECORDER.cleanup_retention()")
+          migration_call = api.index("migration = migrate_legacy_recordings(")
+          if retention_call > migration_call:
+              raise SystemExit("Retention must run before legacy transcoding")
+
+          print("Selkies, Chrome persistence and MP3 finalization policy: OK")
           PY

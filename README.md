@@ -9,6 +9,8 @@ Home Assistant OS app for a persistent remote browser session that:
 - starts and stops audio recording manually with a single Play/Stop control;
 - provides a movable, minimizable recorder toolbar whose layout preference is kept in the browser;
 - supports an editable scheduled recording window with independent start and end times;
+- publishes finalized recordings as broadly compatible `audio.mp3` files;
+- automatically migrates legacy `audio.opus` recordings to MP3 on upgrade;
 - removes raw audio segments after 14 days and complete recording folders after 60 days;
 - persists the Google Chrome profile across app restarts and updates.
 
@@ -16,11 +18,11 @@ Home Assistant OS app for a persistent remote browser session that:
 
 **Recording-only architecture.**
 
-The app is now published with Home Assistant's **stable** lifecycle stage. The persistent browser, Ingress, audio/video forwarding, audio-only recording, generic meeting finalization and Chrome-profile persistence have been validated on the target HAOS host. New 1.0.0 toolbar interactions should still receive a target-host smoke test after upgrade.
+The app is published with Home Assistant's **stable** lifecycle stage. Version **2.0.0** changes the finalized recording contract from Opus to MP3 and migrates retained legacy Opus recordings during startup; this new output/migration path should receive a target-host smoke test after upgrade.
 
-Transcription is deliberately **outside this app**. Meeting Recorder's output contract is a finalized `audio.opus` in the session directory. Downstream transcription or processing can consume that file independently.
+Transcription is deliberately **outside this app**. Meeting Recorder's output contract is a finalized `audio.mp3` in the session directory. Downstream transcription or processing can consume that file independently.
 
-A final `audio.opus` is published only after assembly and ffprobe validation, using an atomic rename. No per-recording JSON marker is required.
+A final `audio.mp3` is published only after MP3 encoding and ffprobe validation, using an atomic rename. Legacy `audio.opus` files are converted with the same safety rule and are deleted only after a valid MP3 has been published. No per-recording JSON marker is required.
 
 The app currently supports **amd64 only**.
 

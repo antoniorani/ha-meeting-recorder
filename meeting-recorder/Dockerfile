@@ -13,6 +13,7 @@ USER root
 
 RUN apt-get update && \
     apt-get install --no-install-recommends -y \
+      ffmpeg \
       nginx \
       pulseaudio-utils && \
     apt-get clean && \
@@ -23,6 +24,7 @@ COPY rootfs /
 RUN test -x /etc/container-entrypoint.sh && \
     test -x /usr/bin/sudo-root && \
     command -v ffmpeg >/dev/null 2>&1 && \
+    ffmpeg -hide_banner -encoders 2>/dev/null | grep -q 'libmp3lame' && \
     command -v ffprobe >/dev/null 2>&1 && \
     command -v pactl >/dev/null 2>&1 && \
     command -v nginx >/dev/null 2>&1 && \

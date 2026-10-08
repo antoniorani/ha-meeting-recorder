@@ -33,6 +33,9 @@ CHROME_MARKERS = ("/opt/google/chrome/chrome", "/opt/google/chrome/google-chrome
 SEGMENT_RETENTION_DAYS = 14
 RECORDING_RETENTION_DAYS = 60
 RETENTION_SWEEP_SECONDS = 60 * 60
+FINAL_AUDIO_NAME = "audio.mp3"
+LEGACY_AUDIO_NAME = "audio.opus"
+MP3_ENCODE_TIMEOUT_SECONDS = 60 * 60
 
 
 def log(message: str) -> None:
@@ -66,6 +69,165 @@ def run(
         stdout=subprocess.PIPE if capture else None,
         stderr=subprocess.PIPE if capture else None,
     )
+
+
+def probe_audio_duration(path: Path) -> float:
+    result = run(
+        [
+            "ffprobe",
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "json",
+            str(path),
+        ],
+        timeout=20,
+    )
+    data = json.loads(result.stdout or "{}")
+    duration = float(data.get("format", {}).get("duration", 0) or 0)
+    if duration <= 0:
+        raise RuntimeError(f"Audio file has no measurable duration: {path}")
+    return duration
+
+
+def publish_mp3(
+    input_args: list[str],
+    output: Path,
+    *,
+    bitrate_kbps: int,
+    timeout: float = MP3_ENCODE_TIMEOUT_SECONDS,
+) -> float:
+    """Encode, validate and atomically publish an MP3 file."""
+    temp_output = output.with_name(f".{output.name}.tmp")
+    try:
+        temp_output.unlink()
+    except FileNotFoundError:
+        pass
+
+    try:
+        result = run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-nostdin",
+                "-loglevel", "warning",
+                "-y",
+                *input_args,
+                "-vn",
+                "-c:a", "libmp3lame",
+                "-b:a", f"{bitrate_kbps}k",
+                "-f", "mp3",
+                str(temp_output),
+            ],
+            check=False,
+            timeout=timeout,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"MP3 encoding failed: {(result.stderr or '').strip()}")
+
+        duration = probe_audio_duration(temp_output)
+        temp_output.replace(output)
+        return duration
+    finally:
+        try:
+            temp_output.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def migrate_legacy_recordings(
+    media_root: Path,
+    *,
+    bitrate_kbps: int,
+) -> dict[str, int]:
+    """Convert legacy finalized Opus recordings to the MP3 completion contract."""
+    migrated = 0
+    failed = 0
+
+    try:
+        sessions = list(media_root.iterdir())
+    except FileNotFoundError:
+        return {"migrated": 0, "failed": 0}
+    except OSError as exc:
+        log(f"Legacy audio migration scan failed: {exc}")
+        return {"migrated": 0, "failed": 1}
+
+    for session_dir in sessions:
+        if session_dir.is_symlink() or not session_dir.is_dir():
+            continue
+        if session_started_epoch(session_dir) is None:
+            continue
+
+        source = session_dir / LEGACY_AUDIO_NAME
+        output = session_dir / FINAL_AUDIO_NAME
+        if source.is_symlink() or not source.is_file():
+            continue
+
+        try:
+            if output.is_symlink() or (output.exists() and not output.is_file()):
+                raise RuntimeError(f"Unsafe MP3 output path: {output}")
+
+            if output.is_file():
+                try:
+                    probe_audio_duration(output)
+                except Exception:
+                    output.unlink()
+                    publish_mp3(
+                        ["-i", str(source)],
+                        output,
+                        bitrate_kbps=bitrate_kbps,
+                    )
+            else:
+                publish_mp3(
+                    ["-i", str(source)],
+                    output,
+                    bitrate_kbps=bitrate_kbps,
+                )
+
+            source.unlink()
+            migrated += 1
+            log(f"Migrated legacy recording to MP3: {output}")
+        except Exception as exc:
+            failed += 1
+            log(f"Legacy audio migration failed for {source}: {exc}")
+
+    return {"migrated": migrated, "failed": failed}
+
+
+def reconcile_migrated_state(state_file: Path) -> bool:
+    """Update a legacy state audio_path after its MP3 replacement is published."""
+    try:
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if not isinstance(state, dict):
+        return False
+
+    audio_path = str(state.get("audio_path") or "").strip()
+    if not audio_path:
+        return False
+
+    legacy = Path(audio_path)
+    if legacy.name != LEGACY_AUDIO_NAME:
+        return False
+
+    migrated = legacy.with_name(FINAL_AUDIO_NAME)
+    if legacy.exists() or not migrated.is_file():
+        return False
+
+    state["audio_path"] = str(migrated)
+    state["updated_at"] = iso_now()
+    tmp = state_file.with_suffix(state_file.suffix + ".tmp")
+    try:
+        tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(state_file)
+        return True
+    except OSError as exc:
+        log(f"Could not reconcile migrated recorder state: {exc}")
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+        return False
 
 
 def pactl(*args: str, check: bool = True) -> str:
@@ -393,7 +555,7 @@ class Recorder:
             "started_at": self.started_at,
             "elapsed_seconds": elapsed,
             "directory": str(self.session_dir) if self.session_dir else None,
-            "audio_path": str(self.session_dir / "audio.opus") if self.session_dir else None,
+            "audio_path": str(self.session_dir / FINAL_AUDIO_NAME) if self.session_dir else None,
             "warnings": list(self.warnings),
             "last_error": self.last_error,
             "scheduled_start_at": self.scheduled_start_at,
@@ -775,52 +937,20 @@ class Recorder:
             "".join(f"file '{p.as_posix()}'\n" for p in segments),
             encoding="utf-8",
         )
-        output = self.session_dir / "audio.opus"
-        temp_output = self.session_dir / ".audio.opus.tmp"
-        try:
-            temp_output.unlink()
-        except FileNotFoundError:
-            pass
-
-        result = run(
+        output = self.session_dir / FINAL_AUDIO_NAME
+        bitrate_kbps = int(read_options().get("audio_bitrate_kbps", 64))
+        duration = publish_mp3(
             [
-                "ffmpeg",
-                "-hide_banner",
-                "-nostdin",
-                "-loglevel", "warning",
-                "-y",
                 "-f", "concat",
                 "-safe", "0",
                 "-i", str(concat),
-                "-c", "copy",
-                "-f", "opus",
-                str(temp_output),
             ],
-            check=False,
-            timeout=120,
+            output,
+            bitrate_kbps=bitrate_kbps,
         )
-        if result.returncode != 0:
-            raise RuntimeError(f"Final audio assembly failed: {(result.stderr or '').strip()}")
 
-        probe = run(
-            [
-                "ffprobe",
-                "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "json",
-                str(temp_output),
-            ],
-            timeout=20,
-        )
-        probe_json = json.loads(probe.stdout or "{}")
-        duration = float(probe_json.get("format", {}).get("duration", 0) or 0)
-        if duration <= 0:
-            raise RuntimeError("Final audio file has no measurable duration")
-
-        # audio.opus is the completion marker for downstream consumers. Publish
-        # it only after assembly and validation have both succeeded.
-        temp_output.replace(output)
-
+        # audio.mp3 is the completion marker for downstream consumers. It is
+        # published only after encoding and validation both succeed.
         completed = self._metadata("completed")
         completed.update(
             {
@@ -887,7 +1017,7 @@ RECORDER = Recorder()
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "MeetingRecorder/1.0.0"
+    server_version = "MeetingRecorder/2.0.0"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         log(fmt % args)
@@ -985,7 +1115,24 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
     STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Apply retention first so expired sessions are removed instead of wasting
+    # CPU transcoding recordings that must be deleted anyway.
     RECORDER.cleanup_retention()
+
+    bitrate_kbps = int(read_options().get("audio_bitrate_kbps", 64))
+    migration = migrate_legacy_recordings(
+        MEDIA_ROOT,
+        bitrate_kbps=bitrate_kbps,
+    )
+    if migration["migrated"] or migration["failed"]:
+        log(
+            "Legacy audio migration finished "
+            f"(migrated={migration['migrated']}, failed={migration['failed']})."
+        )
+    if reconcile_migrated_state(STATE_FILE):
+        log("Updated recorder state to the migrated MP3 path.")
+
     log(f"Control API listening on {HOST}:{PORT}.")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
 
