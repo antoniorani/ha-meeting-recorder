@@ -125,6 +125,9 @@ jobs:
 
           def fake_run(args, *, check=True, timeout=10, capture=True):
               if args[0] == "ffprobe":
+                  target = Path(args[-1])
+                  if target.exists() and target.read_bytes() == b"broken":
+                      raise subprocess.CalledProcessError(1, args, "", "invalid mp3")
                   return subprocess.CompletedProcess(
                       args, 0, '{"format":{"duration":"42.0"}}', ""
                   )
@@ -162,12 +165,16 @@ jobs:
               failed = session(root, "33333333")
               (failed / "audio.opus").write_bytes(b"opus")
 
+              repair = session(root, "44444444")
+              (repair / "audio.opus").write_bytes(b"opus")
+              (repair / "audio.mp3").write_bytes(b"broken")
+
               unrelated = root / "do-not-touch"
               unrelated.mkdir()
               (unrelated / "audio.opus").write_bytes(b"opus")
 
               result = migrate(root, bitrate_kbps=64)
-              if result != {"migrated": 2, "failed": 1}:
+              if result != {"migrated": 3, "failed": 1}:
                   raise SystemExit(f"Unexpected migration result: {result}")
 
               if (convert / "audio.opus").exists() or not (convert / "audio.mp3").is_file():
@@ -176,6 +183,8 @@ jobs:
                   raise SystemExit("Redundant Opus was not removed beside valid MP3")
               if not (failed / "audio.opus").is_file() or (failed / "audio.mp3").exists():
                   raise SystemExit("Failed migration did not preserve the Opus source")
+              if (repair / "audio.opus").exists() or (repair / "audio.mp3").read_bytes() != b"mp3":
+                  raise SystemExit("Invalid existing MP3 was not safely repaired")
               if not (unrelated / "audio.opus").is_file():
                   raise SystemExit("Migration modified an unrelated directory")
 
