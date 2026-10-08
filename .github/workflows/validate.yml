@@ -113,6 +113,7 @@ jobs:
               run_name="meeting_recorder_mp3_migration_test",
           )
           migrate = namespace["migrate_legacy_recordings"]
+          reconcile = namespace["reconcile_migrated_state"]
           original_run = namespace["run"]
           now = datetime.now().astimezone()
 
@@ -148,6 +149,12 @@ jobs:
               convert = session(root, "11111111")
               (convert / "audio.opus").write_bytes(b"opus")
 
+              state_file = root / "state.json"
+              state_file.write_text(
+                  '{"state":"completed","audio_path":"' + str(convert / "audio.opus") + '"}',
+                  encoding="utf-8",
+              )
+
               already_done = session(root, "22222222")
               (already_done / "audio.opus").write_bytes(b"opus")
               (already_done / "audio.mp3").write_bytes(b"mp3")
@@ -171,6 +178,14 @@ jobs:
                   raise SystemExit("Failed migration did not preserve the Opus source")
               if not (unrelated / "audio.opus").is_file():
                   raise SystemExit("Migration modified an unrelated directory")
+
+              if not reconcile(state_file):
+                  raise SystemExit("Migrated state path was not updated")
+              state = state_file.read_text(encoding="utf-8")
+              if str(convert / "audio.mp3") not in state or "audio.opus" in state:
+                  raise SystemExit("State still points to legacy Opus after migration")
+              if reconcile(state_file):
+                  raise SystemExit("State reconciliation is not idempotent")
 
               second = migrate(root, bitrate_kbps=64)
               if second != {"migrated": 0, "failed": 1}:
@@ -280,6 +295,7 @@ jobs:
               'LEGACY_AUDIO_NAME = "audio.opus"',
               'def publish_mp3(',
               'def migrate_legacy_recordings(',
+              'def reconcile_migrated_state(',
               '"libmp3lame"',
               'def set_schedule(',
               'def cancel_schedule(',
@@ -349,6 +365,11 @@ jobs:
 
           if 'source.unlink()' not in api:
               raise SystemExit("Legacy Opus removal must happen only after MP3 publication")
+
+          retention_call = api.index("RECORDER.cleanup_retention()")
+          migration_call = api.index("migration = migrate_legacy_recordings(")
+          if retention_call > migration_call:
+              raise SystemExit("Retention must run before legacy transcoding")
 
           print("Selkies, Chrome persistence and MP3 finalization policy: OK")
           PY
