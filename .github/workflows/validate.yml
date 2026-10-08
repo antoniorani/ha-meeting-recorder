@@ -140,7 +140,7 @@ jobs:
                   capture=capture,
               )
 
-          namespace["run"] = fake_run
+          migrate.__globals__["run"] = fake_run
 
           with tempfile.TemporaryDirectory() as tmp:
               root = Path(tmp)
