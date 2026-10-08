@@ -185,6 +185,35 @@ def migrate_legacy_recordings(
     return {"migrated": migrated, "failed": failed}
 
 
+def reconcile_migrated_state(state_file: Path) -> bool:
+    """Update a legacy state audio_path after its MP3 replacement is published."""
+    try:
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if not isinstance(state, dict):
+        return False
+
+    audio_path = str(state.get("audio_path") or "").strip()
+    if not audio_path:
+        return False
+
+    legacy = Path(audio_path)
+    if legacy.name != LEGACY_AUDIO_NAME:
+        return False
+
+    migrated = legacy.with_name(FINAL_AUDIO_NAME)
+    if legacy.exists() or not migrated.is_file():
+        return False
+
+    state["audio_path"] = str(migrated)
+    state["updated_at"] = iso_now()
+    tmp = state_file.with_suffix(state_file.suffix + ".tmp")
+    tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(state_file)
+    return True
+
+
 def pactl(*args: str, check: bool = True) -> str:
     result = run(["pactl", *args], check=check)
     return (result.stdout or "").strip()
@@ -1071,6 +1100,10 @@ def main() -> None:
     MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
     STATE_DIR.mkdir(parents=True, exist_ok=True)
 
+    # Apply retention first so expired sessions are removed instead of wasting
+    # CPU transcoding recordings that must be deleted anyway.
+    RECORDER.cleanup_retention()
+
     bitrate_kbps = int(read_options().get("audio_bitrate_kbps", 64))
     migration = migrate_legacy_recordings(
         MEDIA_ROOT,
@@ -1081,8 +1114,9 @@ def main() -> None:
             "Legacy audio migration finished "
             f"(migrated={migration['migrated']}, failed={migration['failed']})."
         )
+    if reconcile_migrated_state(STATE_FILE):
+        log("Updated recorder state to the migrated MP3 path.")
 
-    RECORDER.cleanup_retention()
     log(f"Control API listening on {HOST}:{PORT}.")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
 
