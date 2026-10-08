@@ -128,7 +128,7 @@ remote meeting audio
                               v
                        meeting_recorder_mix
                               |
-client mic                    +--> meeting_recorder_mix.monitor --> FFmpeg --> Opus segments
+client mic                    +--> meeting_recorder_mix.monitor --> FFmpeg --> Opus segments --> MP3 finalization
    |
    v
 SelkiesVirtualMic ------------+
@@ -143,6 +143,8 @@ shm_size_mb: 2048
 segment_seconds: 300
 audio_bitrate_kbps: 64
 ```
+
+`audio_bitrate_kbps` remains the single audio bitrate setting: it is used for the resilient Opus capture segments and for final MP3 encoding, including legacy Opus migration.
 
 ## Privacy note about mute
 
