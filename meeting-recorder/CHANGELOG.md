@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0.1
+
+- Encode finalized MP3 files as stereo 48 kHz CBR using the configured audio bitrate.
+- Strip copied metadata and disable ID3v2 plus Xing/Info headers for a simpler MP3 structure that is more compatible with Windows players.
+- Strengthen MP3 validation to require the MP3 codec, 48 kHz stereo audio, measurable duration, and the compatibility header profile.
+- Normalize MP3 files created by 2.0.0 automatically at startup.
+- Prefer the preserved legacy Opus source when it is still available; otherwise safely rewrite the existing MP3 in place through a temporary file.
+- Leave already-compatible MP3 files untouched on future starts.
+- Preserve the original MP3 if normalization fails so the operation is safely retryable.
+- Keep recording segments, scheduling, retention and UI behavior unchanged.
+
+
 ## 2.0.0
 
 - Change the finalized recording contract from `audio.opus` to `audio.mp3`.
