@@ -12,7 +12,7 @@ The target HAOS host has already validated:
 - generic meeting/browser finalization;
 - persistent Google Chrome configuration across add-on restarts/updates.
 
-Version **0.6.0** deliberately removes transcription from this app. Version **1.0.0** marks the Home Assistant lifecycle as stable. Version **2.0.0** changes the finalized recording contract from Opus to MP3 and performs a safe one-time migration of retained legacy Opus recordings at startup. The MP3 finalization/migration path should still receive a target-host smoke test after upgrade.
+Version **0.6.0** deliberately removes transcription from this app. Version **1.0.0** marks the Home Assistant lifecycle as stable. Version **2.0.0** changes the finalized recording contract from Opus to MP3. Version **2.0.1** makes that MP3 contract deliberately conservative for Windows playback and normalizes MP3 files produced by 2.0.0 at startup.
 
 ## Normal flow
 
@@ -55,11 +55,13 @@ audio.mp3 does not exist  -> recording is incomplete/not finalized
 audio.mp3 exists          -> recording is complete and validated
 ```
 
-To make that rule reliable, Meeting Recorder never writes directly to the final filename. It encodes the Opus segments into a temporary MP3 in the same directory, validates its duration with ffprobe, then performs an atomic rename to `audio.mp3`.
+To make that rule reliable, Meeting Recorder never writes directly to the final filename. It encodes the Opus segments into a temporary MP3 in the same directory, validates the MP3 stream and compatibility profile, then performs an atomic rename to `audio.mp3`.
+
+The 2.0.1 MP3 profile is intentionally simple: stereo, 48 kHz, constant configured bitrate, no copied metadata, no ID3v2 header and no Xing/Info header. The absence of those optional headers makes duration and seeking depend on the CBR stream itself rather than metadata/index structures that some Windows players interpret inconsistently.
 
 ### Legacy Opus migration
 
-On startup, version 2.0.0 applies the existing retention policy first, so sessions already due for 60-day deletion are removed rather than needlessly transcoded. It then scans only remaining Meeting Recorder session directories. For each legacy finalized `audio.opus`, it creates and validates `audio.mp3` first, atomically publishes the MP3, and only then removes the Opus source. If conversion or validation fails, the original Opus file remains untouched so the migration can be retried on the next start. An already-valid `audio.mp3` is accepted and the redundant legacy Opus file is removed without re-encoding. If an invalid MP3 is present beside a valid legacy Opus source, the invalid target is replaced from that preserved source. If the internal runtime state still points to a migrated `audio.opus`, that path is atomically reconciled to `audio.mp3`; failure to rewrite that internal state is logged but does not prevent the app from starting.
+On startup, retention is applied first so sessions already due for 60-day deletion are not needlessly transcoded. Legacy `audio.opus` files are then migrated using the current 2.0.1 MP3 compatibility profile and are deleted only after the replacement has been validated and atomically published. Next, remaining `audio.mp3` files are checked: files already matching the compatibility profile are left untouched, while older 2.0.0 MP3 files with ID3v2/Xing/Info structures are rewritten once through the same safe temporary-file pipeline. If a rewrite fails, the existing MP3 remains intact for a later retry. Unrelated directories are ignored. Internal runtime state is reconciled from `audio.opus` to `audio.mp3` when needed, but state reconciliation is never a startup blocker.
 
 ## Recording retention
 
@@ -144,7 +146,7 @@ segment_seconds: 300
 audio_bitrate_kbps: 64
 ```
 
-`audio_bitrate_kbps` remains the single audio bitrate setting: it is used for the resilient Opus capture segments and for final MP3 encoding, including legacy Opus migration.
+`audio_bitrate_kbps` remains the single audio bitrate setting: it is used for the resilient Opus capture segments and for final CBR MP3 encoding, including legacy Opus migration and one-time normalization of older MP3 files.
 
 ## Privacy note about mute
 
