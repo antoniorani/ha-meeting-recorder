@@ -113,6 +113,7 @@ jobs:
               run_name="meeting_recorder_mp3_migration_test",
           )
           migrate = namespace["migrate_legacy_recordings"]
+          normalize = namespace["normalize_existing_mp3s"]
           reconcile = namespace["reconcile_migrated_state"]
           original_run = namespace["run"]
           now = datetime.now().astimezone()
@@ -129,11 +130,14 @@ jobs:
                   if target.exists() and target.read_bytes() == b"broken":
                       raise subprocess.CalledProcessError(1, args, "", "invalid mp3")
                   return subprocess.CompletedProcess(
-                      args, 0, '{"format":{"duration":"42.0"}}', ""
+                      args,
+                      0,
+                      '{"streams":[{"codec_name":"mp3","sample_rate":"48000","channels":2}],"format":{"duration":"42.0"}}',
+                      "",
                   )
               if args[0] == "ffmpeg":
                   source = args[args.index("-i") + 1]
-                  if "33333333" in source:
+                  if "33333333" in source or "77777777" in source:
                       return subprocess.CompletedProcess(args, 1, "", "synthetic failure")
                   Path(args[-1]).write_bytes(b"mp3")
                   return subprocess.CompletedProcess(args, 0, "", "")
@@ -169,9 +173,19 @@ jobs:
               (repair / "audio.opus").write_bytes(b"opus")
               (repair / "audio.mp3").write_bytes(b"broken")
 
+              legacy_mp3 = session(root, "55555555")
+              (legacy_mp3 / "audio.mp3").write_bytes(b"ID3legacy-Info")
+
+              compatible_mp3 = session(root, "66666666")
+              (compatible_mp3 / "audio.mp3").write_bytes(b"\xff\xfbcompatible")
+
+              failed_mp3 = session(root, "77777777")
+              (failed_mp3 / "audio.mp3").write_bytes(b"ID3keep-on-failure")
+
               unrelated = root / "do-not-touch"
               unrelated.mkdir()
               (unrelated / "audio.opus").write_bytes(b"opus")
+              (unrelated / "audio.mp3").write_bytes(b"ID3do-not-touch")
 
               result = migrate(root, bitrate_kbps=64)
               if result != {"migrated": 3, "failed": 1}:
@@ -188,6 +202,18 @@ jobs:
               if not (unrelated / "audio.opus").is_file():
                   raise SystemExit("Migration modified an unrelated directory")
 
+              normalization = normalize(root, bitrate_kbps=64)
+              if normalization != {"normalized": 1, "failed": 1}:
+                  raise SystemExit(f"Unexpected MP3 normalization result: {normalization}")
+              if (legacy_mp3 / "audio.mp3").read_bytes() != b"mp3":
+                  raise SystemExit("Legacy MP3 was not rewritten to the compatibility profile")
+              if (compatible_mp3 / "audio.mp3").read_bytes() != b"\xff\xfbcompatible":
+                  raise SystemExit("Compatible MP3 was unnecessarily rewritten")
+              if (failed_mp3 / "audio.mp3").read_bytes() != b"ID3keep-on-failure":
+                  raise SystemExit("Failed MP3 normalization did not preserve the source")
+              if (unrelated / "audio.mp3").read_bytes() != b"ID3do-not-touch":
+                  raise SystemExit("MP3 normalization modified an unrelated directory")
+
               if not reconcile(state_file):
                   raise SystemExit("Migrated state path was not updated")
               state = state_file.read_text(encoding="utf-8")
@@ -200,7 +226,13 @@ jobs:
               if second != {"migrated": 0, "failed": 1}:
                   raise SystemExit(f"Migration is not idempotent: {second}")
 
-          print("Legacy Opus migration: OK")
+              second_normalization = normalize(root, bitrate_kbps=64)
+              if second_normalization != {"normalized": 0, "failed": 1}:
+                  raise SystemExit(
+                      f"MP3 normalization is not idempotent: {second_normalization}"
+                  )
+
+          print("Legacy Opus migration and MP3 normalization: OK")
           PY
 
       - name: Validate injected JavaScript
@@ -224,8 +256,8 @@ jobs:
           if config["arch"] != ["amd64"]:
               raise SystemExit("Current target must declare amd64 only")
 
-          if config["version"] != "2.0.0":
-              raise SystemExit("MP3 output contract must ship as version 2.0.0")
+          if config["version"] != "2.0.1":
+              raise SystemExit("Windows-compatible MP3 output must ship as version 2.0.1")
 
           if config.get("stage", "stable") != "stable":
               raise SystemExit("Meeting Recorder must be published with the stable lifecycle stage")
@@ -302,8 +334,10 @@ jobs:
               'RECORDER.cleanup_retention()',
               'FINAL_AUDIO_NAME = "audio.mp3"',
               'LEGACY_AUDIO_NAME = "audio.opus"',
+              'def validate_mp3(',
               'def publish_mp3(',
               'def migrate_legacy_recordings(',
+              'def normalize_existing_mp3s(',
               'def reconcile_migrated_state(',
               '"libmp3lame"',
               'def set_schedule(',
@@ -369,8 +403,18 @@ jobs:
           if "grep -q 'libmp3lame'" not in dockerfile:
               raise SystemExit("Runtime image must verify the libmp3lame encoder")
 
-          if 'temp_output.replace(output)' not in api or 'probe_audio_duration(temp_output)' not in api:
+          if 'temp_output.replace(output)' not in api or 'validate_mp3(temp_output)' not in api:
               raise SystemExit("Final MP3 must be validated before atomic publication")
+
+          for required in (
+              '"-map_metadata", "-1"',
+              '"-ac", "2"',
+              '"-ar", "48000"',
+              '"-id3v2_version", "0"',
+              '"-write_xing", "0"',
+          ):
+              if required not in api:
+                  raise SystemExit(f"Missing Windows-compatible MP3 setting: {required}")
 
           if 'source.unlink()' not in api:
               raise SystemExit("Legacy Opus removal must happen only after MP3 publication")
