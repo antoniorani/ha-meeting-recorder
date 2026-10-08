@@ -59,7 +59,7 @@ To make that rule reliable, Meeting Recorder never writes directly to the final 
 
 ### Legacy Opus migration
 
-On startup, version 2.0.0 scans only Meeting Recorder session directories. For each legacy finalized `audio.opus`, it creates and validates `audio.mp3` first, atomically publishes the MP3, and only then removes the Opus source. If conversion or validation fails, the original Opus file remains untouched so the migration can be retried on the next start. An already-valid `audio.mp3` is accepted and the redundant legacy Opus file is removed without re-encoding.
+On startup, version 2.0.0 applies the existing retention policy first, so sessions already due for 60-day deletion are removed rather than needlessly transcoded. It then scans only remaining Meeting Recorder session directories. For each legacy finalized `audio.opus`, it creates and validates `audio.mp3` first, atomically publishes the MP3, and only then removes the Opus source. If conversion or validation fails, the original Opus file remains untouched so the migration can be retried on the next start. An already-valid `audio.mp3` is accepted and the redundant legacy Opus file is removed without re-encoding. If the internal runtime state still points to a migrated `audio.opus`, that path is atomically reconciled to `audio.mp3`.
 
 ## Recording retention
 
