@@ -99,7 +99,7 @@ def validate_mp3(path: Path) -> float:
         raise RuntimeError(f"MP3 has no measurable duration: {path}")
 
     with path.open("rb") as handle:
-        header = handle.read(4096)
+        header = handle.read(512)
     if header.startswith(b"ID3"):
         raise RuntimeError(f"MP3 contains an ID3v2 header: {path}")
     if b"Xing" in header or b"Info" in header:
