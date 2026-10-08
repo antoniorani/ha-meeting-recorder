@@ -167,7 +167,15 @@ def migrate_legacy_recordings(
                 raise RuntimeError(f"Unsafe MP3 output path: {output}")
 
             if output.is_file():
-                probe_audio_duration(output)
+                try:
+                    probe_audio_duration(output)
+                except Exception:
+                    output.unlink()
+                    publish_mp3(
+                        ["-i", str(source)],
+                        output,
+                        bitrate_kbps=bitrate_kbps,
+                    )
             else:
                 publish_mp3(
                     ["-i", str(source)],
@@ -209,9 +217,17 @@ def reconcile_migrated_state(state_file: Path) -> bool:
     state["audio_path"] = str(migrated)
     state["updated_at"] = iso_now()
     tmp = state_file.with_suffix(state_file.suffix + ".tmp")
-    tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(state_file)
-    return True
+    try:
+        tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(state_file)
+        return True
+    except OSError as exc:
+        log(f"Could not reconcile migrated recorder state: {exc}")
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+        return False
 
 
 def pactl(*args: str, check: bool = True) -> str:
