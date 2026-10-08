@@ -11,7 +11,8 @@
 - Preserve a legacy Opus file when migration fails so a later restart can retry safely.
 - Require the runtime FFmpeg build to expose the `libmp3lame` encoder.
 - Keep the 14-day segment and 60-day recording retention policy unchanged, applying retention before migration to avoid transcoding sessions already due for deletion.
-- Reconcile internal runtime state from a migrated `audio.opus` path to `audio.mp3`.
+- Reconcile internal runtime state from a migrated `audio.opus` path to `audio.mp3` without making state reconciliation a startup blocker.
+- Replace an invalid pre-existing `audio.mp3` from the preserved legacy Opus source instead of leaving migration permanently stuck.
 
 
 ## 1.0.0
