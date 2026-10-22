@@ -87,6 +87,7 @@
 
     #mr-control.minimized #mr-state,
     #mr-control.minimized #mr-schedule,
+    #mr-control.minimized #mr-close-chrome,
     #mr-control.minimized #mr-msg {
       display: none;
     }
@@ -153,6 +154,24 @@
       background: #dedee3;
       color: #555;
       opacity: 1;
+    }
+
+    #mr-close-chrome {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+      color: #cfcfd5;
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+
+    #mr-close-chrome input {
+      width: 14px;
+      height: 14px;
+      margin: 0;
+      accent-color: #ff4965;
     }
 
     #mr-control button:disabled,
@@ -225,6 +244,10 @@
         <input id="mr-end-time" type="datetime-local" step="60" aria-label="Fin programado">
       </label>
     </div>
+    <label id="mr-close-chrome" title="Cerrar Chrome al finalizar la grabación">
+      <input type="checkbox" aria-label="Cerrar Chrome al finalizar la grabación">
+      <span>Cerrar Chrome</span>
+    </label>
     <span id="mr-msg" aria-live="polite"></span>
     <button id="mr-minimize" type="button" aria-label="Minimizar barra" title="Minimizar barra" aria-expanded="true">−</button>
   `;
@@ -235,6 +258,7 @@
   const stateLabel = root.querySelector("#mr-state");
   const startTimeInput = root.querySelector("#mr-start-time");
   const endTimeInput = root.querySelector("#mr-end-time");
+  const closeChromeInput = root.querySelector("#mr-close-chrome input");
   const message = root.querySelector("#mr-msg");
   const minimizeButton = root.querySelector("#mr-minimize");
 
@@ -387,6 +411,7 @@
     return [
       recording ? "" : startTimeInput.value,
       endTimeInput.value,
+      closeChromeInput.checked ? "1" : "0",
     ].join("|");
   }
 
@@ -411,6 +436,7 @@
       body: {
         scheduled_start_at: start ? start.toISOString() : null,
         scheduled_end_at: end ? end.toISOString() : null,
+        close_chrome_on_stop: closeChromeInput.checked,
       },
     };
   }
@@ -438,6 +464,10 @@
 
     startTimeInput.disabled = busy || recording;
     endTimeInput.disabled = busy;
+    closeChromeInput.disabled = busy;
+    if (!scheduleDirty) {
+      closeChromeInput.checked = Boolean(status?.close_chrome_on_stop);
+    }
 
     if (recording) {
       if (status.started_at) {
@@ -563,6 +593,7 @@
   endTimeInput.addEventListener("input", markScheduleDirty);
   startTimeInput.addEventListener("change", syncSchedule);
   endTimeInput.addEventListener("change", syncSchedule);
+  closeChromeInput.addEventListener("change", syncSchedule);
 
   window.addEventListener("resize", () => {
     if (Number.isFinite(toolbarState.x) && Number.isFinite(toolbarState.y)) {

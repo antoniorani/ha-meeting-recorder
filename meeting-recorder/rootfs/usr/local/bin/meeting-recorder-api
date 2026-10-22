@@ -560,6 +560,7 @@ class Recorder:
         self.scheduled_start_epoch: Optional[float] = None
         self.scheduled_end_at: Optional[str] = None
         self.scheduled_end_epoch: Optional[float] = None
+        self.close_chrome_on_stop = False
         self.scheduler_stop = threading.Event()
         self._restore_state()
         self.scheduler = threading.Thread(
@@ -575,8 +576,14 @@ class Recorder:
         except Exception:
             return
 
+        # An interrupted or already-completed recording must not arm a later close.
+        self.close_chrome_on_stop = (
+            old.get("state") == "ready" and old.get("close_chrome_on_stop") is True
+        )
+
         if old.get("state") == "recording":
             old["state"] = "interrupted"
+            old["close_chrome_on_stop"] = False
             old["interrupted_at"] = iso_now()
             old["scheduled_start_at"] = None
             old["scheduled_end_at"] = None
@@ -631,6 +638,7 @@ class Recorder:
             "last_error": self.last_error,
             "scheduled_start_at": self.scheduled_start_at,
             "scheduled_end_at": self.scheduled_end_at,
+            "close_chrome_on_stop": self.close_chrome_on_stop,
             "updated_at": iso_now(),
         }
 
@@ -704,6 +712,7 @@ class Recorder:
 
             if start_due and end_due:
                 with self.lock:
+                    self.close_chrome_on_stop = False
                     self._clear_schedule()
                     self._persist_current_state()
                 log("Scheduled recording window already elapsed; schedule cleared.")
@@ -715,6 +724,7 @@ class Recorder:
                     self.start()
                 except Exception as exc:
                     with self.lock:
+                        self.close_chrome_on_stop = False
                         self._clear_schedule()
                         self.last_error = str(exc)
                         self._persist_current_state()
@@ -729,6 +739,7 @@ class Recorder:
                         self.stop()
                     else:
                         with self.lock:
+                            self.close_chrome_on_stop = False
                             self._clear_schedule()
                             self._persist_current_state()
                         log("Scheduled end reached with no active recording; schedule cleared.")
@@ -740,8 +751,11 @@ class Recorder:
         self,
         start_value: Optional[str],
         end_value: Optional[str],
+        close_chrome_on_stop: Optional[bool] = None,
     ) -> dict[str, Any]:
         with self.lock:
+            if close_chrome_on_stop is not None and type(close_chrome_on_stop) is not bool:
+                raise ValueError("close_chrome_on_stop must be a boolean")
             running = self.ffmpeg is not None and self.ffmpeg.poll() is None
             if running and start_value:
                 raise RuntimeError("A recording is already active; its start time cannot be rescheduled")
@@ -759,6 +773,8 @@ class Recorder:
             self.scheduled_start_epoch = start[1] if start else None
             self.scheduled_end_at = end[0] if end else None
             self.scheduled_end_epoch = end[1] if end else None
+            if close_chrome_on_stop is not None:
+                self.close_chrome_on_stop = close_chrome_on_stop
             self.last_error = None
             self._persist_current_state()
             log(
@@ -1048,18 +1064,38 @@ class Recorder:
                 self.last_completed = completed
                 log(f"Recording finalized: {completed.get('audio_path')}")
             except Exception as exc:
+                self.close_chrome_on_stop = False
                 self.last_error = str(exc)
                 failed = self._metadata("error")
                 self._write_json(STATE_FILE, failed)
                 raise
             finally:
                 self.started_monotonic = None
+
+            if self.close_chrome_on_stop:
+                # Publish the MP3 first; the browser closure is an optional one-shot action.
+                self.close_chrome_on_stop = False
+                completed["close_chrome_on_stop"] = False
+                self._write_json(STATE_FILE, completed)
+                try:
+                    browser_result = terminate_chrome()
+                    log(
+                        "Chrome closed after recording "
+                        f"(found={browser_result['found']}, killed={browser_result['killed']})."
+                    )
+                except Exception as exc:
+                    # A Chrome failure must not invalidate an already finalized MP3.
+                    self.last_error = f"Could not close Chrome: {exc}"
+                    completed["last_error"] = self.last_error
+                    self._write_json(STATE_FILE, completed)
+                    log(self.last_error)
             return self.status()
 
     def finalize_meeting(self, reason: str = "manual") -> dict[str, Any]:
         """End the generic browser participant and finalize any active recording."""
         with self.lock:
             self._clear_schedule()
+            self.close_chrome_on_stop = False
 
             browser_result = terminate_chrome()
             if browser_result["found"]:
@@ -1088,7 +1124,7 @@ RECORDER = Recorder()
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "MeetingRecorder/2.0.1"
+    server_version = "MeetingRecorder/2.1.0"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         log(fmt % args)
@@ -1147,7 +1183,7 @@ class Handler(BaseHTTPRequestHandler):
                 body = self._read_json()
                 start_value = str(body.get("scheduled_start_at") or "").strip() or None
                 end_value = str(body.get("scheduled_end_at") or "").strip() or None
-                self._json(200, RECORDER.set_schedule(start_value, end_value))
+                self._json(200, RECORDER.set_schedule(start_value, end_value, body.get("close_chrome_on_stop")))
             elif self.path == "/meeting/start-time":
                 body = self._read_json()
                 value = str(body.get("scheduled_start_at", "")).strip()

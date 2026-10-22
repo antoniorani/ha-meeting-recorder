@@ -238,6 +238,9 @@ jobs:
       - name: Validate injected JavaScript
         run: node --check meeting-recorder/rootfs/usr/local/share/meeting-recorder/controls.js
 
+      - name: Test optional Chrome closure
+        run: python -m unittest discover -s tests -v
+
       - name: Check Home Assistant app configuration
         run: |
           python - <<'PY'
