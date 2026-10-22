@@ -115,6 +115,25 @@ class ChromeClosureTests(unittest.TestCase):
                         recorder._restore_state()
                         self.assertIs(recorder.close_chrome_on_stop, expected)
 
+    def test_expired_schedule_does_not_arm_future_closure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            path.write_text(
+                json.dumps({
+                    "state": "ready",
+                    "scheduled_end_at": "2000-01-01T00:00:00+00:00",
+                    "close_chrome_on_stop": True,
+                }),
+                encoding="utf-8",
+            )
+            with patch.dict(Recorder._restore_state.__globals__, {"STATE_FILE": path}):
+                recorder = Recorder.__new__(Recorder)
+                recorder.close_chrome_on_stop = False
+                recorder._write_json = Mock()
+                recorder._restore_state()
+                self.assertFalse(recorder.close_chrome_on_stop)
+                self.assertFalse(recorder._write_json.call_args.args[1]["close_chrome_on_stop"])
+
     def test_scheduled_end_uses_same_closure_path(self):
         self.recorder.close_chrome_on_stop = True
         self.recorder.scheduled_end_epoch = time.time() - 1
