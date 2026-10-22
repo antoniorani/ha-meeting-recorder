@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.0
+
+- Add a compact, optional **Cerrar Chrome** checkbox to the recorder toolbar, hidden when minimized.
+- Close Chrome only after successful recording finalization, including scheduled ends without an open Home Assistant UI.
+- Persist the pending choice in recorder state and reset it after use, failure, or a missed scheduled recording window.
+- Reuse the existing Chrome termination helper and recording schedule API without new dependencies.
+
 ## 2.0.1
 
 - Encode finalized MP3 files as stereo 48 kHz CBR using the configured audio bitrate.

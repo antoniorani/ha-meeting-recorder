@@ -25,8 +25,9 @@ Version **0.6.0** deliberately removes transcription from this app. Version **1.
 7. Drag the toolbar from its grip to move it. Use `−` to minimize it; Play/Stop remains available while minimized, and `+` restores the full toolbar. Position and minimized state are remembered in the browser.
 8. You can close Home Assistant; Chrome, scheduled actions and active recording continue in the server.
 9. Press **Stop** or let the scheduled end time fire to finalize the audio. Manual stop clears any remaining schedule.
-10. Stopping recording does not close Chrome. The generic `/meeting/stop` API remains available for explicit browser-participant finalization.
-11. Only after MP3 encoding and ffprobe validation succeed is the finalized recording published as `audio.mp3`.
+10. Optionally check **Cerrar Chrome** in the toolbar before the recording ends. After the MP3 is finalized, Chrome is closed even for a scheduled stop with the Home Assistant UI disconnected. This opt-in survives a normal app restart while a schedule is pending and resets after the recording ends; it is off by default and does not close Chrome if finalization fails.
+11. Without this option, stopping a recording keeps Chrome open. The generic `/meeting/stop` API remains available for explicit browser-participant finalization.
+12. Only after MP3 encoding and ffprobe validation succeed is the finalized recording published as `audio.mp3`.
 
 Meeting Recorder does not navigate to meetings, fill IDs/PINs or use Playwright.
 

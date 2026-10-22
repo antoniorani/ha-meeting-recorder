@@ -7,6 +7,7 @@ Home Assistant OS app for a persistent remote browser session that:
 - forwards microphone and webcam to that persistent browser session;
 - records **audio only**;
 - starts and stops audio recording manually with a single Play/Stop control;
+- optionally closes Chrome after a recording finishes, including scheduled endings;
 - provides a movable, minimizable recorder toolbar whose layout preference is kept in the browser;
 - supports an editable scheduled recording window with independent start and end times;
 - publishes finalized recordings as broadly compatible `audio.mp3` files;
@@ -18,7 +19,7 @@ Home Assistant OS app for a persistent remote browser session that:
 
 **Recording-only architecture.**
 
-The app is published with Home Assistant's **stable** lifecycle stage. Version **2.0.1** keeps MP3 as the finalized recording contract and normalizes both new and already-created MP3 files to a simple CBR compatibility profile intended to behave reliably in Windows players as well as Home Assistant.
+The app is published with Home Assistant's **stable** lifecycle stage. Version **2.1.0** adds optional, one-shot Chrome closure after successful manual or scheduled recording finalization. It keeps the MP3 completion contract and CBR compatibility profile introduced in 2.0.1, intended to behave reliably in Windows players as well as Home Assistant.
 
 Transcription is deliberately **outside this app**. Meeting Recorder's output contract is a finalized `audio.mp3` in the session directory. Downstream transcription or processing can consume that file independently.
 
