@@ -604,6 +604,8 @@ class Recorder:
             if restored_start and restored_end and restored_start[1] >= restored_end[1]:
                 raise ValueError("scheduled_end_at must be after scheduled_start_at")
         except ValueError:
+            self.close_chrome_on_stop = False
+            old["close_chrome_on_stop"] = False
             old["scheduled_start_at"] = None
             old["scheduled_end_at"] = None
             self._write_json(STATE_FILE, old)
