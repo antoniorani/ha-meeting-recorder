@@ -259,8 +259,9 @@ jobs:
           if config["arch"] != ["amd64"]:
               raise SystemExit("Current target must declare amd64 only")
 
-          if config["version"] != "2.0.1":
-              raise SystemExit("Windows-compatible MP3 output must ship as version 2.0.1")
+          version = tuple(map(int, config["version"].split(".")))
+          if version < (2, 0, 1):
+              raise SystemExit("Windows-compatible MP3 output requires version 2.0.1 or later")
 
           if config.get("stage", "stable") != "stable":
               raise SystemExit("Meeting Recorder must be published with the stable lifecycle stage")
