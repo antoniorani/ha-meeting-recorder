@@ -28,7 +28,7 @@ Version **0.6.0** deliberately removes transcription from this app. Version **1.
 10. Optionally check **Cerrar Chrome** in the toolbar before the recording ends. After the MP3 is finalized, Chrome is closed even for a scheduled stop with the Home Assistant UI disconnected. This opt-in survives a normal app restart while a schedule is pending and resets after the recording ends; it is off by default and does not close Chrome if finalization fails.
 11. Without this option, stopping a recording keeps Chrome open. The generic `/meeting/stop` API remains available for explicit browser-participant finalization.
 12. Only after MP3 encoding and ffprobe validation succeed is the finalized recording published as `audio.mp3`.
-13. Select **Panel** in the desktop recorder toolbar to return to the dashboard without stopping the persistent desktop or the recording.
+13. Select the **back-arrow button** in the desktop recorder toolbar to return to the dashboard without stopping the persistent desktop or the recording.
 
 Meeting Recorder does not navigate to meetings, fill IDs/PINs or use Playwright.
 
