@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Meeting Recorder</title>
+  <link rel="stylesheet" href="meeting-recorder/dashboard.css">
+  <script defer src="meeting-recorder/dashboard.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="page-width header-content">
+      <div class="brand">
+        <span class="brand-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="2.5" width="6" height="12" rx="3"></rect>
+            <path d="M5.5 10.5a6.5 6.5 0 0 0 13 0M12 17v4m-4 0h8"></path>
+          </svg>
+        </span>
+        <div>
+          <p class="eyebrow">HOME ASSISTANT</p>
+          <h1>Meeting Recorder</h1>
+        </div>
+      </div>
+      <span class="header-caption">Panel de gestión</span>
+    </div>
+  </header>
+
+  <main class="page-width">
+    <section class="card desktop-card" aria-labelledby="desktop-title">
+      <div class="desktop-copy">
+        <p class="section-label">ESPACIO DE TRABAJO</p>
+        <h2 id="desktop-title">Tu escritorio de reuniones</h2>
+        <p>Accede a Chrome para unirte a tus reuniones y controlar la grabación como siempre.</p>
+        <a class="button button-primary" href="?desktop=1">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="13" rx="2"></rect><path d="M8 21h8m-4-4v4"></path>
+          </svg>
+          Abrir escritorio virtual
+        </a>
+      </div>
+      <div class="desktop-illustration" aria-hidden="true">
+        <div class="screen"><div class="screen-bar"><i></i><i></i><i></i></div>
+          <div class="screen-content"><div class="screen-circle"></div><div class="screen-lines"><span></span><span></span></div></div>
+        </div>
+        <div class="screen-stand"></div>
+      </div>
+    </section>
+
+    <section class="card status-card" aria-labelledby="status-title">
+      <div class="card-heading">
+        <div>
+          <p class="section-label">EN DIRECTO</p>
+          <h2 id="status-title">Estado de la grabación</h2>
+        </div>
+        <span id="recording-badge" class="status-badge" aria-live="polite">
+          <span class="status-dot"></span><span id="recording-label">Consultando…</span>
+        </span>
+      </div>
+      <div class="status-details">
+        <div>
+          <span class="detail-label">Duración actual</span>
+          <strong id="recording-duration" class="detail-value">—</strong>
+        </div>
+        <div>
+          <span class="detail-label">Audio</span>
+          <strong id="audio-status" class="detail-value">—</strong>
+        </div>
+        <div>
+          <span class="detail-label">Próximo inicio</span>
+          <strong id="scheduled-start" class="detail-value">Sin programar</strong>
+        </div>
+        <div>
+          <span class="detail-label">Próximo fin</span>
+          <strong id="scheduled-end" class="detail-value">Sin programar</strong>
+        </div>
+      </div>
+      <p id="status-error" class="inline-error" role="alert" hidden></p>
+    </section>
+
+    <section class="card recordings-card" aria-labelledby="recordings-title">
+      <div class="card-heading recordings-heading">
+        <div>
+          <p class="section-label">ARCHIVO</p>
+          <h2 id="recordings-title">Grabaciones</h2>
+          <p class="section-description">Carpetas ordenadas de la más reciente a la más antigua.</p>
+        </div>
+        <button id="refresh-recordings" class="button button-secondary" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20 7v5h-5M4 17v-5h5"></path><path d="M5.8 9a7 7 0 0 1 12.3-2L20 12M4 12l1.9 5A7 7 0 0 0 18.2 15"></path>
+          </svg>
+          Actualizar
+        </button>
+      </div>
+      <p id="recordings-error" class="inline-error" role="alert" hidden></p>
+      <div id="recordings-list" aria-live="polite">
+        <p class="empty-message">Cargando grabaciones…</p>
+      </div>
+      <p class="retention-note">Las grabaciones se conservan durante 60 días. Los MP3 pendientes o fallidos no aparecen como descargables.</p>
+    </section>
+  </main>
+</body>
+</html>
