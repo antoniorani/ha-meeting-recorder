@@ -16,9 +16,9 @@ Version **0.6.0** deliberately removes transcription from this app. Version **1.
 
 ## Normal flow
 
-1. Start Meeting Recorder and open its Web UI.
-2. Use the persistent remote Google Chrome manually.
-3. Navigate to Jitsi, Meet, Teams, Webex or another compatible web meeting and join it yourself.
+1. Start Meeting Recorder and open its Web UI; the management dashboard appears.
+2. Review recording status or download a finalized MP3 from the newest-first folder list.
+3. Select **Abrir escritorio virtual** to use the persistent remote Google Chrome, then navigate to Jitsi, Meet, Teams, Webex or another compatible meeting and join it yourself.
 4. Press the **Play** button to start recording immediately, or set **Inicio** and/or **Fin** to define a recording window.
 5. Each date/time field saves automatically when its value changes. Clearing a field with the selector's native clear action removes that scheduled boundary.
 6. Pending start/end times remain visible in their own fields. When recording is active, Play becomes **Stop**, Inicio shows the actual recording start and is read-only, and Fin remains editable.
@@ -28,8 +28,31 @@ Version **0.6.0** deliberately removes transcription from this app. Version **1.
 10. Optionally check **Cerrar Chrome** in the toolbar before the recording ends. After the MP3 is finalized, Chrome is closed even for a scheduled stop with the Home Assistant UI disconnected. This opt-in survives a normal app restart while a schedule is pending and resets after the recording ends; it is off by default and does not close Chrome if finalization fails.
 11. Without this option, stopping a recording keeps Chrome open. The generic `/meeting/stop` API remains available for explicit browser-participant finalization.
 12. Only after MP3 encoding and ffprobe validation succeed is the finalized recording published as `audio.mp3`.
+13. Select **Panel** in the desktop recorder toolbar to return to the dashboard without stopping the persistent desktop or the recording.
 
 Meeting Recorder does not navigate to meetings, fill IDs/PINs or use Playwright.
+
+## Management dashboard and downloads
+
+The Home Assistant Ingress root renders a static dashboard by default. Selecting
+**Abrir escritorio virtual** loads the unchanged Selkies root using
+`?desktop=1`. Selkies asset and WebSocket requests still use their original
+root paths, so the management page does not interrupt streaming or persistent
+recordings.
+
+The dashboard requests `/meeting-recorder/api/status` and the new read-only
+`/meeting-recorder/api/recordings` endpoint. The latter returns only
+app-generated session directories, ordered newest first, with an ISO start
+timestamp, an `audio_available` boolean, and the MP3 size where available.
+
+A finalized MP3 can be downloaded from
+`/meeting-recorder/api/recordings/<session>/audio.mp3`. The API restricts
+the folder name, rejects symlinked folders/files and empty MP3 files, streams
+the audio as an attachment, and exposes neither raw segments nor logs.
+Folders without a finalized `audio.mp3` are shown but have no download action.
+
+The dashboard is dependency-free and responds to `prefers-color-scheme`.
+Nginx and the recording API remain private behind Home Assistant Ingress.
 
 ## Completion contract
 
