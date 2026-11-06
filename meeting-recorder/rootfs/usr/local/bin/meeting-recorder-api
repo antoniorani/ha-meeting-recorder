@@ -495,7 +495,8 @@ def list_recording_sessions(media_root: Path) -> list[dict[str, Any]]:
         size = None
         if not audio.is_symlink() and audio.is_file():
             try:
-                size = audio.stat().st_size
+                file_size = audio.stat().st_size
+                size = file_size if file_size > 0 else None
             except OSError:
                 pass
 
@@ -522,7 +523,7 @@ def recording_audio_path(media_root: Path, session_name: str) -> Optional[Path]:
     ):
         return None
     audio = directory / FINAL_AUDIO_NAME
-    if audio.is_symlink() or not audio.is_file():
+    if audio.is_symlink() or not audio.is_file() or audio.stat().st_size <= 0:
         return None
     return audio
 
@@ -1222,7 +1223,7 @@ class Handler(BaseHTTPRequestHandler):
 
         with os.fdopen(descriptor, "rb") as stream:
             info = os.fstat(stream.fileno())
-            if not stat.S_ISREG(info.st_mode):
+            if not stat.S_ISREG(info.st_mode) or info.st_size <= 0:
                 self._json(404, {"error": "not_found"})
                 return
             self.send_response(200)
