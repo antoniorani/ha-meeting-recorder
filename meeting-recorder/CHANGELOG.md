@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.2.0
+
+- Add a Home Assistant-style management dashboard as the default Ingress entry page, with automatic light/dark color schemes.
+- Keep the existing Selkies desktop and recording controls available via `?desktop=1`, with a link back to the dashboard.
+- Show live recording status, audio readiness, schedules, and errors using the existing read-only status API.
+- List generated recording folders newest first, including sessions without a finalized MP3.
+- Expose download-only MP3 endpoints for finalized sessions, excluding symlinks, unknown paths, and empty files.
+- Add standard-library tests for history ordering and safe file downloads; retain all existing recording logic.
+
 ## 2.1.0
 
 - Add a compact, optional **Cerrar Chrome** checkbox to the recorder toolbar, hidden when minimized.

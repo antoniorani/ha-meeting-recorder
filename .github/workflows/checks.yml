@@ -1,0 +1,33 @@
+name: Meeting Recorder checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check Python and API tests
+        run: |
+          python3 -m py_compile meeting-recorder/rootfs/usr/local/bin/meeting-recorder-api
+          python3 -m unittest discover -s meeting-recorder/tests -v
+
+      - name: Check JavaScript syntax
+        run: |
+          node --check meeting-recorder/rootfs/usr/local/share/meeting-recorder/controls.js
+          node --check meeting-recorder/rootfs/usr/local/share/meeting-recorder/dashboard.js
+
+      - name: Validate Nginx configuration
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq nginx
+          sudo cp meeting-recorder/rootfs/etc/nginx/nginx.conf /etc/nginx/nginx.conf
+          sudo cp meeting-recorder/rootfs/etc/nginx/meeting-recorder-selkies.conf /etc/nginx/meeting-recorder-selkies.conf
+          sudo nginx -t

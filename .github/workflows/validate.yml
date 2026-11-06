@@ -314,9 +314,12 @@ jobs:
               raise SystemExit("Missing runtime settings: " + ", ".join(missing))
 
           nginx = Path("meeting-recorder/rootfs/etc/nginx/nginx.conf").read_text(encoding="utf-8")
-          for required in ("listen 8080", "127.0.0.1:8081", "127.0.0.1:8099", "controls.js"):
+          selkies_proxy = Path("meeting-recorder/rootfs/etc/nginx/meeting-recorder-selkies.conf").read_text(encoding="utf-8")
+          for required in ("listen 8080", "127.0.0.1:8099", "controls.js", "include /etc/nginx/meeting-recorder-selkies.conf"):
               if required not in nginx:
                   raise SystemExit(f"Missing nginx gateway setting: {required}")
+          if "127.0.0.1:8081" not in selkies_proxy:
+              raise SystemExit("Missing Selkies backend in shared Nginx proxy")
 
           api = Path("meeting-recorder/rootfs/usr/local/bin/meeting-recorder-api").read_text(encoding="utf-8")
           if 'STATE_DIR = Path("/data/meeting-recorder")' not in api:

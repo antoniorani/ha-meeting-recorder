@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import stat
 import signal
 import shutil
 import subprocess
@@ -34,6 +36,7 @@ SEGMENT_RETENTION_DAYS = 14
 RECORDING_RETENTION_DAYS = 60
 RETENTION_SWEEP_SECONDS = 60 * 60
 FINAL_AUDIO_NAME = "audio.mp3"
+SESSION_NAME_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}_\d{6}_[0-9a-f]{8}\Z")
 LEGACY_AUDIO_NAME = "audio.opus"
 MP3_ENCODE_TIMEOUT_SECONDS = 60 * 60
 
@@ -471,6 +474,58 @@ def session_started_epoch(session_dir: Path) -> Optional[float]:
         return started.timestamp()
     except (ValueError, OSError):
         return None
+
+
+def list_recording_sessions(media_root: Path) -> list[dict[str, Any]]:
+    """List generated recording folders, newest first, without exposing internal files."""
+    sessions = []
+    try:
+        directories = list(media_root.iterdir())
+    except FileNotFoundError:
+        return []
+
+    for directory in directories:
+        if directory.is_symlink() or not directory.is_dir():
+            continue
+        started_epoch = session_started_epoch(directory)
+        if started_epoch is None:
+            continue
+
+        audio = directory / FINAL_AUDIO_NAME
+        size = None
+        if not audio.is_symlink() and audio.is_file():
+            try:
+                file_size = audio.stat().st_size
+                size = file_size if file_size > 0 else None
+            except OSError:
+                pass
+
+        sessions.append({
+            "id": directory.name,
+            "started_at": datetime.fromtimestamp(started_epoch, timezone.utc)
+                .isoformat().replace("+00:00", "Z"),
+            "audio_available": size is not None,
+            "size_bytes": size,
+        })
+
+    return sorted(sessions, key=lambda session: session["id"], reverse=True)
+
+
+def recording_audio_path(media_root: Path, session_name: str) -> Optional[Path]:
+    """Resolve only the published MP3 inside an app-generated session folder."""
+    if not SESSION_NAME_PATTERN.fullmatch(session_name):
+        return None
+    directory = media_root / session_name
+    if (
+        session_started_epoch(directory) is None
+        or directory.is_symlink()
+        or not directory.is_dir()
+    ):
+        return None
+    audio = directory / FINAL_AUDIO_NAME
+    if audio.is_symlink() or not audio.is_file() or audio.stat().st_size <= 0:
+        return None
+    return audio
 
 
 def cleanup_recordings(
@@ -1126,7 +1181,7 @@ RECORDER = Recorder()
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "MeetingRecorder/2.1.0"
+    server_version = "MeetingRecorder/2.2.0"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         log(fmt % args)
@@ -1153,6 +1208,39 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("JSON body must be an object")
         return data
 
+    def _send_recording(self, session_name: str) -> None:
+        audio = recording_audio_path(MEDIA_ROOT, session_name)
+        if audio is None:
+            self._json(404, {"error": "not_found"})
+            return
+
+        # O_NOFOLLOW prevents opening a replaced symlink between lookup and open.
+        try:
+            descriptor = os.open(audio, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        except OSError:
+            self._json(404, {"error": "not_found"})
+            return
+
+        with os.fdopen(descriptor, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size <= 0:
+                self._json(404, {"error": "not_found"})
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/mpeg")
+            self.send_header("Content-Length", str(info.st_size))
+            self.send_header(
+                "Content-Disposition", f'attachment; filename="{session_name}.mp3"'
+            )
+            self.send_header("Cache-Control", "private, no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            try:
+                shutil.copyfileobj(stream, self.wfile, length=128 * 1024)
+            except (BrokenPipeError, ConnectionResetError):
+                # A cancelled download does not affect the recording.
+                pass
+
     def do_GET(self) -> None:
         if self.path == "/status":
             self._json(200, RECORDER.status())
@@ -1160,6 +1248,18 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"ok": True, "audio_ready": audio_ready(), "time": iso_now()})
         elif self.path == "/audio":
             self._json(200, RECORDER.diagnostics())
+        elif self.path == "/recordings":
+            try:
+                self._json(200, {"recordings": list_recording_sessions(MEDIA_ROOT)})
+            except OSError as exc:
+                log(f"Recording list failed: {exc}")
+                self._json(500, {"error": "recordings_unavailable"})
+        elif self.path.startswith("/recordings/"):
+            parts = self.path.split("/")
+            if len(parts) == 4 and parts[3] == FINAL_AUDIO_NAME:
+                self._send_recording(parts[2])
+            else:
+                self._json(404, {"error": "not_found"})
         else:
             self._json(404, {"error": "not_found"})
 
