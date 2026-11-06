@@ -61,7 +61,8 @@
     statusReceivedAt = Date.now();
 
     const recording = Boolean(status.recording);
-    label.textContent = recording ? "Grabando" : "En espera";
+    const nextLabel = recording ? "Grabando" : "En espera";
+    if (label.textContent !== nextLabel) label.textContent = nextLabel;
     badge.classList.toggle("is-recording", recording);
     badge.classList.toggle("is-ready", !recording);
     badge.classList.remove("is-unavailable");
@@ -92,6 +93,7 @@
 
   function recordingNode(session) {
     const node = template.content.firstElementChild.cloneNode(true);
+    node.dataset.sessionId = session.id;
     const available = session.audio_available === true;
 
     node.querySelector(".folder-title").textContent = formatDate(session.started_at);
@@ -121,9 +123,16 @@
     try {
       const payload = await fetchJson("recordings");
       const sessions = Array.isArray(payload.recordings) ? payload.recordings : [];
+      const opened = new Set(
+        Array.from(recordingsList.querySelectorAll("details[open]"), (item) => item.dataset.sessionId)
+      );
       const contents = document.createDocumentFragment();
       if (sessions.length) {
-        for (const session of sessions) contents.append(recordingNode(session));
+        for (const session of sessions) {
+          const node = recordingNode(session);
+          node.open = opened.has(session.id);
+          contents.append(node);
+        }
       } else {
         const empty = document.createElement("p");
         empty.className = "empty-message";
