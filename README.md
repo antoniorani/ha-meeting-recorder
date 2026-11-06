@@ -33,7 +33,7 @@ The app currently supports **amd64 only**.
 Home Assistant Ingress opens the **management dashboard** by default. It displays
 live recording status, audio readiness, scheduled start/end times, and recording
 folders in newest-first order. Open **Escritorio virtual** to enter the existing
-Selkies/Chrome desktop; select **Panel** in the recording toolbar to return.
+Selkies/Chrome desktop; select the back-arrow button in the recording toolbar to return.
 
 The dashboard follows the device's light/dark color-scheme preference with no
 external JavaScript or CSS dependencies. It polls the existing status API and a
