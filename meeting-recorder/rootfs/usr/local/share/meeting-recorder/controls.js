@@ -10,6 +10,7 @@
   if (!script) return;
 
   const apiBase = new URL("api/", script.src);
+  const dashboardUrl = new URL("../", script.src);
   const TOOLBAR_STATE_KEY = "meeting-recorder-toolbar-v1";
 
   const PLAY_ICON = `
@@ -90,6 +91,22 @@
     #mr-control.minimized #mr-close-chrome,
     #mr-control.minimized #mr-msg {
       display: none;
+    }
+
+    #mr-dashboard {
+      padding: 8px 9px;
+      color: #d5eefa;
+      font-size: 12px;
+      font-weight: 700;
+      border-radius: 8px;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    #mr-dashboard:hover,
+    #mr-dashboard:focus-visible {
+      background: rgba(255, 255, 255, .12);
+      color: #fff;
     }
 
     #mr-toggle {
@@ -233,6 +250,7 @@
   root.innerHTML = `
     <button id="mr-drag" type="button" aria-label="Mover barra" title="Mover barra">⠿</button>
     <button id="mr-toggle" type="button" aria-label="Iniciar grabación" title="Iniciar grabación">${PLAY_ICON}</button>
+    <a id="mr-dashboard" href="${dashboardUrl.href}" aria-label="Volver al panel de gestión" title="Volver al panel de gestión">Panel</a>
     <span id="mr-state">Preparando…</span>
     <div id="mr-schedule">
       <label class="mr-field">
