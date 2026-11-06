@@ -94,13 +94,24 @@
     }
 
     #mr-dashboard {
-      padding: 8px 9px;
-      color: #d5eefa;
-      font-size: 12px;
-      font-weight: 700;
+      width: 34px;
+      height: 34px;
+      display: inline-grid;
+      place-items: center;
+      flex: 0 0 34px;
       border-radius: 8px;
+      color: #d5eefa;
       text-decoration: none;
-      white-space: nowrap;
+    }
+
+    #mr-dashboard svg {
+      width: 20px;
+      height: 20px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
 
     #mr-dashboard:hover,
@@ -250,7 +261,9 @@
   root.innerHTML = `
     <button id="mr-drag" type="button" aria-label="Mover barra" title="Mover barra">⠿</button>
     <button id="mr-toggle" type="button" aria-label="Iniciar grabación" title="Iniciar grabación">${PLAY_ICON}</button>
-    <a id="mr-dashboard" href="${dashboardUrl.href}" aria-label="Volver al panel de gestión" title="Volver al panel de gestión">Panel</a>
+    <a id="mr-dashboard" href="${dashboardUrl.href}" aria-label="Volver al panel de gestión" title="Volver al panel de gestión">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5m7 7-7-7 7-7"></path></svg>
+    </a>
     <span id="mr-state">Preparando…</span>
     <div id="mr-schedule">
       <label class="mr-field">

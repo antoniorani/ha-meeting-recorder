@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.2.1
+
+- Replace the desktop toolbar's **Panel** text link with an accessible back-arrow button to return to the management dashboard.
+- Remove the redundant dashboard header already provided by Home Assistant; preserve the content heading and responsive layout.
+
 ## 2.2.0
 
 - Add a Home Assistant-style management dashboard as the default Ingress entry page, with automatic light/dark color schemes.
